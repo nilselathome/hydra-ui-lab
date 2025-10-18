@@ -2,11 +2,33 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Hydra Layer Editor with Blend Modes</title>
+  <title>Hydra Layer Editor (Fixed)</title>
   <style>
-    html, body { margin:0; padding:0; background:black; overflow:hidden; }
-    canvas { display:block; width:100vw; height:100vh; }
-    #ui { position:fixed; top:10px; left:10px; z-index:10; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: black;
+      overflow: hidden;
+      height: 100%;
+    }
+
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #ui {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 9999;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 8px;
+      border-radius: 12px;
+      color: white;
+      font-family: sans-serif;
+    }
   </style>
 </head>
 <body>
@@ -24,12 +46,19 @@
     // Hydra setup
     // ----------------------------
     const canvas = document.getElementById("hydraCanvas");
-    const hydra = new Hydra({ canvas });
-    hydra.setResolution(window.innerWidth, window.innerHeight);
-    hydra.show();
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const hydra = new Hydra({
+      detectAudio: false,
+      canvas,
+      makeGlobal: true,
+      autoLoop: true,
+      autoStart: true,
+    });
 
     // ----------------------------
-    // Effect metadata
+    // Effect definitions
     // ----------------------------
     const effectDefinitions = {
       osc: {
@@ -53,25 +82,14 @@
           { key: "smoothing", min: 0, max: 1, default: 0.01 },
         ],
       },
-      rotate: {
-        args: [{ key: "rotate", min: 0, max: 1, default: 0.3 }],
-      },
-      kaleid: {
-        args: [{ key: "kaleidSides", min: 1, max: 12, default: 3 }],
-      },
     };
 
-    const blendModes = ["blend", "add", "mult", "diff"];
-
     // ----------------------------
-    // State
+    // State + UI
     // ----------------------------
     let layers = [];
     const pane = new Pane({ container: document.getElementById("ui") });
 
-    // ----------------------------
-    // Helpers
-    // ----------------------------
     function createLayer(type, outputBuffer) {
       const def = effectDefinitions[type];
       if (!def) return;
@@ -93,21 +111,18 @@
     }
 
     function renderLayers() {
-      // Build all layers and send to buffers
+      // build each layer
       layers.forEach(layer => {
         const def = effectDefinitions[layer.type];
         let node = window[layer.type](...def.args.map(arg => layer.params[arg.key]));
-
-        // Apply optional effects
         layer.effects.forEach(effect => {
           const args = effect.args.map(a => layer.params[a]);
           node = node[effect.fn](...args);
         });
-
         node.out(layer.output);
       });
 
-      // Composite all layers sequentially
+      // blend layers
       if (layers.length === 1) {
         src(layers[0].output).out();
       } else {
@@ -117,24 +132,19 @@
         }
         node.out();
       }
-
-      render(o0); // ensure Hydra renders the frame
     }
 
     function addLayerUI(layer) {
       const folder = pane.addFolder({ title: `Layer: ${layer.type}`, expanded: true });
 
-      // Layer parameters
       for (let key in layer.params) {
         folder.addBinding(layer.params, key, { min: 0, max: 60 }).on("change", renderLayers);
       }
 
-      // Blend mode dropdown
       folder.addBinding(layer, "blendMode", {
         options: { Blend: "blend", Add: "add", Multiply: "mult", Difference: "diff" }
       }).on("change", renderLayers);
 
-      // Add effect buttons
       folder.addButton({ title: "+ Rotate" }).on("click", () => {
         layer.effects.push({ fn: "rotate", args: ["rotate"] });
         if (!("rotate" in layer.params)) {
@@ -155,7 +165,7 @@
     }
 
     // ----------------------------
-    // UI for adding layers
+    // Add layer controls
     // ----------------------------
     const addButtons = pane.addFolder({ title: "Add Layer" });
     addButtons.addButton({ title: "Osc → o0" }).on("click", () => createLayer("osc", o0));
@@ -163,7 +173,7 @@
     addButtons.addButton({ title: "Shape → o2" }).on("click", () => createLayer("shape", o2));
 
     // ----------------------------
-    // Initialize first layer
+    // Initialize with one layer
     // ----------------------------
     createLayer("osc", o0);
   </script>
