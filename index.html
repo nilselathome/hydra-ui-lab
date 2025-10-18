@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Hydra Layer Editor (Final)</title>
+  <title>Hydra Layer Editor (Working)</title>
   <style>
     html, body {
       margin: 0;
@@ -65,7 +65,7 @@
         args: [
           { key: "frequency", min: 0, max: 60, default: 10 },
           { key: "sync", min: 0, max: 1, default: 0.2 },
-          { key: "offset", min: -1, max: 1, default: 0.5 },
+          { key: "offset", min: -1, max: 1, default: 0 },
         ],
       },
       voronoi: {
@@ -147,7 +147,11 @@
       const folder = pane.addFolder({ title: `Layer: ${layer.type}`, expanded: true });
 
       for (let key in layer.params) {
-        folder.addBinding(layer.params, key, { min: 0, max: 60 }).on("change", renderLayers);
+        const argDef = effectDefinitions[layer.type].args.find(a => a.key === key);
+        if (argDef) {
+          folder.addBinding(layer.params, key, { min: argDef.min, max: argDef.max })
+            .on("change", renderLayers);
+        }
       }
 
       folder.addBinding(layer, "blendMode", {
@@ -185,18 +189,18 @@
     // Initialize with one visible layer
     // ----------------------------
     requestAnimationFrame(() => {
-      osc(10, 0.2, 0).color(1, 1, 1).out(o0);
-      render(o0); // 👈 ensures Hydra actually displays to the screen
+      // Create a visible oscillator
+      osc(10, 0.2, 0)    // frequency, sync, offset=0
+  .color(1, 1, 1)   // full RGB
+  .brightness(0.5)  // boost intensity
+  .out(o0);
 
+      render(o0); // 👈 tell Hydra to display buffer o0 to the screen
+
+      // Register layer + UI
       createLayer("osc", o0);
       renderLayers();
     });
-
-    // Force Hydra to start rendering after it's initialized
-    setTimeout(() => {
-      src(o0).out();
-      renderLayers();
-    }, 1200);
   </script>
 </body>
 </html>
