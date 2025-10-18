@@ -20,8 +20,13 @@
   <script type="module">
     import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
 
+    // ----------------------------
+    // Hydra setup
+    // ----------------------------
     const canvas = document.getElementById("hydraCanvas");
     const hydra = new Hydra({ canvas });
+    hydra.setResolution(window.innerWidth, window.innerHeight);
+    hydra.show();
 
     // ----------------------------
     // Effect metadata
@@ -29,9 +34,9 @@
     const effectDefinitions = {
       osc: {
         args: [
-          { key: "frequency", min: 0, max: 60, default: 3.47 },
-          { key: "sync", min: 0, max: 1, default: 0.1 },
-          { key: "offset", min: -1, max: 1, default: time },
+          { key: "frequency", min: 0, max: 60, default: 10 },
+          { key: "sync", min: 0, max: 1, default: 0.2 },
+          { key: "offset", min: -1, max: 1, default: 0.5 },
         ],
       },
       voronoi: {
@@ -56,7 +61,7 @@
       },
     };
 
-    const blendModes = ["blend", "add", "sub", "mult", "diff", "mask", "layer"];
+    const blendModes = ["blend", "add", "mult", "diff"];
 
     // ----------------------------
     // State
@@ -78,7 +83,7 @@
         type,
         params: layerParams,
         effects: [],
-        output: outputBuffer, 
+        output: outputBuffer,
         blendMode: "blend",
       };
 
@@ -88,20 +93,21 @@
     }
 
     function renderLayers() {
+      // Build all layers and send to buffers
       layers.forEach(layer => {
         const def = effectDefinitions[layer.type];
         let node = window[layer.type](...def.args.map(arg => layer.params[arg.key]));
 
-        // apply per-layer effects
+        // Apply optional effects
         layer.effects.forEach(effect => {
           const args = effect.args.map(a => layer.params[a]);
-          node = node[effect.fn](...args, time);
+          node = node[effect.fn](...args);
         });
 
         node.out(layer.output);
       });
 
-      // composite all layers sequentially
+      // Composite all layers sequentially
       if (layers.length === 1) {
         src(layers[0].output).out();
       } else {
@@ -111,30 +117,24 @@
         }
         node.out();
       }
+
+      render(o0); // ensure Hydra renders the frame
     }
 
     function addLayerUI(layer) {
       const folder = pane.addFolder({ title: `Layer: ${layer.type}`, expanded: true });
 
-      // layer params
+      // Layer parameters
       for (let key in layer.params) {
         folder.addBinding(layer.params, key, { min: 0, max: 60 }).on("change", renderLayers);
       }
 
-      // blend mode dropdown
+      // Blend mode dropdown
       folder.addBinding(layer, "blendMode", {
-        options: {
-          Blend: "blend",
-          Add: "add",
-          Multiply: "mult",
-          Subtract: "sub",
-          Difference: "diff",
-          Mask: "mask",
-          Layer: "layer"
-        }
+        options: { Blend: "blend", Add: "add", Multiply: "mult", Difference: "diff" }
       }).on("change", renderLayers);
 
-      // add effect buttons
+      // Add effect buttons
       folder.addButton({ title: "+ Rotate" }).on("click", () => {
         layer.effects.push({ fn: "rotate", args: ["rotate"] });
         if (!("rotate" in layer.params)) {
@@ -151,7 +151,6 @@
           folder.addBinding(layer.params, "kaleidSides", { min: 1, max: 12 }).on("change", renderLayers);
         }
         renderLayers();
-        render();
       });
     }
 
@@ -163,7 +162,9 @@
     addButtons.addButton({ title: "Voronoi → o1" }).on("click", () => createLayer("voronoi", o1));
     addButtons.addButton({ title: "Shape → o2" }).on("click", () => createLayer("shape", o2));
 
-    // start with one layer
+    // ----------------------------
+    // Initialize first layer
+    // ----------------------------
     createLayer("osc", o0);
   </script>
 </body>
