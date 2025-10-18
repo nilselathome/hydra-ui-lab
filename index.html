@@ -1,18 +1,170 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Hydra + Tweakpane + Vite</title>
-    <!-- Hydra and Tweakpane UMD builds -->
-    <style>
-      body, html { margin: 0; padding: 0; overflow: hidden; background: black; }
-      canvas { display: block; width: 100vw; height: 100vh; }
-      </style>
-  </head>
-  <body>
-    <canvas id="hydraCanvas"></canvas>
-    
-    <script src="https://cdn.jsdelivr.net/npm/hydra-synth@1.3.29/dist/hydra-synth.js"></script>
-    <script type="module" src="/src/main.js"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <title>Hydra Layer Editor with Blend Modes</title>
+  <style>
+    html, body { margin:0; padding:0; background:black; overflow:hidden; }
+    canvas { display:block; width:100vw; height:100vh; }
+    #ui { position:fixed; top:10px; left:10px; z-index:10; }
+  </style>
+</head>
+<body>
+  <canvas id="hydraCanvas"></canvas>
+  <div id="ui"></div>
+
+  <!-- Hydra -->
+  <script src="https://cdn.jsdelivr.net/npm/hydra-synth@1.3.29/dist/hydra-synth.min.js"></script>
+
+  <!-- Tweakpane v4 -->
+  <script type="module">
+    import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
+
+    const canvas = document.getElementById("hydraCanvas");
+    const hydra = new Hydra({ canvas });
+
+    // ----------------------------
+    // Effect metadata
+    // ----------------------------
+    const effectDefinitions = {
+      osc: {
+        args: [
+          { key: "frequency", min: 0, max: 60, default: 3.47 },
+          { key: "sync", min: 0, max: 1, default: 0.1 },
+          { key: "offset", min: -1, max: 1, default: time },
+        ],
+      },
+      voronoi: {
+        args: [
+          { key: "scale", min: 1, max: 50, default: 5 },
+          { key: "speed", min: 0, max: 2, default: 0.1 },
+          { key: "blend", min: 0, max: 1, default: 0.3 },
+        ],
+      },
+      shape: {
+        args: [
+          { key: "sides", min: 3, max: 12, default: 3 },
+          { key: "radius", min: 0, max: 1, default: 0.5 },
+          { key: "smoothing", min: 0, max: 1, default: 0.01 },
+        ],
+      },
+      rotate: {
+        args: [{ key: "rotate", min: 0, max: 1, default: 0.3 }],
+      },
+      kaleid: {
+        args: [{ key: "kaleidSides", min: 1, max: 12, default: 3 }],
+      },
+    };
+
+    const blendModes = ["blend", "add", "sub", "mult", "diff", "mask", "layer"];
+
+    // ----------------------------
+    // State
+    // ----------------------------
+    let layers = [];
+    const pane = new Pane({ container: document.getElementById("ui") });
+
+    // ----------------------------
+    // Helpers
+    // ----------------------------
+    function createLayer(type, outputBuffer) {
+      const def = effectDefinitions[type];
+      if (!def) return;
+
+      const layerParams = {};
+      def.args.forEach(arg => { layerParams[arg.key] = arg.default; });
+
+      const layer = {
+        type,
+        params: layerParams,
+        effects: [],
+        output: outputBuffer, 
+        blendMode: "blend",
+      };
+
+      layers.push(layer);
+      addLayerUI(layer);
+      renderLayers();
+    }
+
+    function renderLayers() {
+      layers.forEach(layer => {
+        const def = effectDefinitions[layer.type];
+        let node = window[layer.type](...def.args.map(arg => layer.params[arg.key]));
+
+        // apply per-layer effects
+        layer.effects.forEach(effect => {
+          const args = effect.args.map(a => layer.params[a]);
+          node = node[effect.fn](...args, time);
+        });
+
+        node.out(layer.output);
+      });
+
+      // composite all layers sequentially
+      if (layers.length === 1) {
+        src(layers[0].output).out();
+      } else {
+        let node = src(layers[0].output);
+        for (let i = 1; i < layers.length; i++) {
+          node = node[layers[i].blendMode](layers[i].output, 0.5);
+        }
+        node.out();
+      }
+    }
+
+    function addLayerUI(layer) {
+      const folder = pane.addFolder({ title: `Layer: ${layer.type}`, expanded: true });
+
+      // layer params
+      for (let key in layer.params) {
+        folder.addBinding(layer.params, key, { min: 0, max: 60 }).on("change", renderLayers);
+      }
+
+      // blend mode dropdown
+      folder.addBinding(layer, "blendMode", {
+        options: {
+          Blend: "blend",
+          Add: "add",
+          Multiply: "mult",
+          Subtract: "sub",
+          Difference: "diff",
+          Mask: "mask",
+          Layer: "layer"
+        }
+      }).on("change", renderLayers);
+
+      // add effect buttons
+      folder.addButton({ title: "+ Rotate" }).on("click", () => {
+        layer.effects.push({ fn: "rotate", args: ["rotate"] });
+        if (!("rotate" in layer.params)) {
+          layer.params.rotate = 0.3;
+          folder.addBinding(layer.params, "rotate", { min: 0, max: 1 }).on("change", renderLayers);
+        }
+        renderLayers();
+      });
+
+      folder.addButton({ title: "+ Kaleid" }).on("click", () => {
+        layer.effects.push({ fn: "kaleid", args: ["kaleidSides"] });
+        if (!("kaleidSides" in layer.params)) {
+          layer.params.kaleidSides = 3;
+          folder.addBinding(layer.params, "kaleidSides", { min: 1, max: 12 }).on("change", renderLayers);
+        }
+        renderLayers();
+        render();
+      });
+    }
+
+    // ----------------------------
+    // UI for adding layers
+    // ----------------------------
+    const addButtons = pane.addFolder({ title: "Add Layer" });
+    addButtons.addButton({ title: "Osc → o0" }).on("click", () => createLayer("osc", o0));
+    addButtons.addButton({ title: "Voronoi → o1" }).on("click", () => createLayer("voronoi", o1));
+    addButtons.addButton({ title: "Shape → o2" }).on("click", () => createLayer("shape", o2));
+
+    // start with one layer
+    createLayer("osc", o0);
+  </script>
+</body>
 </html>
