@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Hydra Minimal Test</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: black; height: 100%; overflow: hidden; }
+    canvas { width: 100vw; height: 100vh; display: block; }
+  </style>
+</head>
+<body>
+  <canvas id="hydraCanvas"></canvas>
+
+  <script src="https://cdn.jsdelivr.net/npm/hydra-synth@1.3.29/dist/hydra-synth.min.js"></script>
+  <script>
+    // ✅ Initialize Hydra manually
+    const canvas = document.getElementById("hydraCanvas");
+    const hydra = new Hydra({ canvas, detectAudio: false, makeGlobal: true });
+
+    // ✅ Wait for Hydra to fully initialize
+    setTimeout(() => {
+      console.log("Hydra ready?", hydra);
+      osc(10, 0.1, 0.8)
+        .color(1, 0.3, 0.7)
+        .rotate(0.2, 0.3)
+        .modulateRotate(osc(2), 0.2)
+        .out(o0);
+    }, 500);
+  </script>
+</body>
+</html>
