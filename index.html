@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Hydra Layer Editor (Working)</title>
+  <title>Hydra Layer Editor (Osc Visible)</title>
   <style>
     html, body {
       margin: 0;
@@ -114,12 +114,10 @@
     }
 
     function renderLayers() {
-      // Build each layer
       layers.forEach(layer => {
         const def = effectDefinitions[layer.type];
         let node = window[layer.type](...def.args.map(arg => layer.params[arg.key]));
 
-        // Apply extra effects if any
         layer.effects.forEach(effect => {
           const args = effect.args.map(a => layer.params[a]);
           node = node[effect.fn](...args);
@@ -128,7 +126,6 @@
         node.out(layer.output);
       });
 
-      // Blend all layers together
       if (layers.length === 1) {
         src(layers[0].output).out();
       } else {
@@ -186,19 +183,15 @@
     addButtons.addButton({ title: "Shape → o2" }).on("click", () => createLayer("shape", o2));
 
     // ----------------------------
-    // Initialize with one visible layer
+    // Initialize with bright visible oscillator
     // ----------------------------
     requestAnimationFrame(() => {
-      // Create a visible oscillator
-      osc(10, 0.2, 0)    // frequency, sync, offset=0
-  .color(1, 1, 1)   // full RGB
-  .brightness(0.5)  // boost intensity
-  .out(o0);
+      // Explicitly set brightness and color so osc is visible
+      osc(10, 0.2, 0).color(1, 1, 1).brightness(0.5).out(o0);
+      render(o0); // ensure buffer is displayed
 
-      render(o0); // 👈 tell Hydra to display buffer o0 to the screen
-
-      // Register layer + UI
-      createLayer("osc", o0);
+      // Add UI-managed layer
+      // createLayer("osc", o0);
       renderLayers();
     });
   </script>
