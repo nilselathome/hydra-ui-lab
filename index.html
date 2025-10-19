@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Hydra Layer Editor (Osc Visible)</title>
+  <title>Hydra Layer Mixer</title>
   <style>
     html, body {
       margin: 0;
@@ -11,13 +11,11 @@
       overflow: hidden;
       height: 100%;
     }
-
     canvas {
-      display: block;
       width: 100vw;
       height: 100vh;
+      display: block;
     }
-
     #ui {
       position: fixed;
       top: 10px;
@@ -35,165 +33,95 @@
   <canvas id="hydraCanvas"></canvas>
   <div id="ui"></div>
 
-  <!-- Hydra -->
   <script src="https://cdn.jsdelivr.net/npm/hydra-synth@1.3.29/dist/hydra-synth.min.js"></script>
-
-  <!-- Tweakpane v4 -->
   <script type="module">
     import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
 
-    // ----------------------------
-    // Hydra setup
-    // ----------------------------
-    const canvas = document.getElementById("hydraCanvas");
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    // --- Hydra setup ---
+    const canvas = document.getElementById('hydraCanvas');
+    const hydra = new Hydra({ canvas, makeGlobal: true, detectAudio: false });
 
-    const hydra = new Hydra({
-      detectAudio: false,
-      canvas,
-      makeGlobal: true,
-      autoLoop: true,
-      autoStart: true,
-    });
+    const pane = new Pane({ container: document.getElementById('ui') });
 
-    // ----------------------------
-    // Effect definitions
-    // ----------------------------
-    const effectDefinitions = {
+    const layerDefs = {
       osc: {
         args: [
-          { key: "frequency", min: 0, max: 60, default: 10 },
-          { key: "sync", min: 0, max: 1, default: 0.2 },
-          { key: "offset", min: -1, max: 1, default: 0 },
-        ],
-      },
-      voronoi: {
-        args: [
-          { key: "scale", min: 1, max: 50, default: 5 },
-          { key: "speed", min: 0, max: 2, default: 0.1 },
-          { key: "blend", min: 0, max: 1, default: 0.3 },
+          { key: 'frequency', min: 0, max: 60, default: 10 },
+          { key: 'sync', min: 0, max: 1, default: 0.2 },
+          { key: 'offset', min: -1, max: 1, default: 0 },
         ],
       },
       shape: {
         args: [
-          { key: "sides", min: 3, max: 12, default: 3 },
-          { key: "radius", min: 0, max: 1, default: 0.5 },
-          { key: "smoothing", min: 0, max: 1, default: 0.01 },
+          { key: 'sides', min: 3, max: 12, default: 3 },
+          { key: 'radius', min: 0, max: 1, default: 0.5 },
+          { key: 'smoothing', min: 0, max: 1, default: 0.01 },
+        ],
+      },
+      voronoi: {
+        args: [
+          { key: 'scale', min: 1, max: 50, default: 5 },
+          { key: 'speed', min: 0, max: 2, default: 0.1 },
+          { key: 'blend', min: 0, max: 1, default: 0.3 },
         ],
       },
     };
 
-    // ----------------------------
-    // State + UI
-    // ----------------------------
     let layers = [];
-    const pane = new Pane({ container: document.getElementById("ui") });
+    const blendModes = ['add', 'blend', 'mult', 'diff'];
 
-    // ----------------------------
-    // Layer creation + rendering
-    // ----------------------------
-    function createLayer(type, outputBuffer) {
-      const def = effectDefinitions[type];
+    // Hydra has o0-o3; we’ll assign one per layer
+    const outputs = [o0, o1, o2, o3];
+
+    // --- UI setup ---
+    const addButtons = pane.addFolder({ title: 'Add Layer' });
+    addButtons.addButton({ title: 'Oscillator' }).on('click', () => addLayer('osc'));
+    addButtons.addButton({ title: 'Shape' }).on('click', () => addLayer('shape'));
+    addButtons.addButton({ title: 'Voronoi' }).on('click', () => addLayer('voronoi'));
+
+    function addLayer(type) {
+      const def = layerDefs[type];
       if (!def) return;
 
-      const layerParams = {};
-      def.args.forEach(arg => { layerParams[arg.key] = arg.default; });
+      const params = {};
+      def.args.forEach(a => (params[a.key] = a.default));
+      const blendMode = 'add';
+      const output = outputs[layers.length % outputs.length];
 
-      const layer = {
-        type,
-        params: layerParams,
-        effects: [],
-        output: outputBuffer,
-        blendMode: "blend",
-      };
-
+      const layer = { type, params, blendMode, output };
       layers.push(layer);
-      addLayerUI(layer);
-      renderLayers();
+
+      const f = pane.addFolder({ title: `Layer ${layers.length}: ${type}` });
+      def.args.forEach(a => {
+        f.addBinding(params, a.key, { min: a.min, max: a.max }).on('change', render);
+      });
+      f.addBinding(layer, 'blendMode', { options: blendModes }).on('change', render);
+
+      render();
     }
 
-    function renderLayers() {
-      layers.forEach(layer => {
-        const def = effectDefinitions[layer.type];
-        let node = window[layer.type](...def.args.map(arg => layer.params[arg.key]));
-
-        layer.effects.forEach(effect => {
-          const args = effect.args.map(a => layer.params[a]);
-          node = node[effect.fn](...args);
-        });
-
-        node.out(layer.output);
+    // --- Render all layers ---
+    function render() {
+      // Draw each layer to its own buffer
+      layers.forEach((layer, i) => {
+        const def = layerDefs[layer.type];
+        let node = window[layer.type](...def.args.map(a => layer.params[a.key]));
+        node.color(1, 1, 1).brightness(0.5).out(layer.output);
       });
 
-      if (layers.length === 1) {
-        src(layers[0].output).out();
-      } else {
+      // Combine all layers
+      if (layers.length > 0) {
         let node = src(layers[0].output);
         for (let i = 1; i < layers.length; i++) {
-          node = node[layers[i].blendMode](layers[i].output, 0.5);
+          node = node[layers[i].blendMode](src(layers[i].output), 0.5);
         }
         node.out();
       }
     }
 
-    // ----------------------------
-    // UI setup
-    // ----------------------------
-    function addLayerUI(layer) {
-      const folder = pane.addFolder({ title: `Layer: ${layer.type}`, expanded: true });
-
-      for (let key in layer.params) {
-        const argDef = effectDefinitions[layer.type].args.find(a => a.key === key);
-        if (argDef) {
-          folder.addBinding(layer.params, key, { min: argDef.min, max: argDef.max })
-            .on("change", renderLayers);
-        }
-      }
-
-      folder.addBinding(layer, "blendMode", {
-        options: { Blend: "blend", Add: "add", Multiply: "mult", Difference: "diff" }
-      }).on("change", renderLayers);
-
-      folder.addButton({ title: "+ Rotate" }).on("click", () => {
-        layer.effects.push({ fn: "rotate", args: ["rotate"] });
-        if (!("rotate" in layer.params)) {
-          layer.params.rotate = 0.3;
-          folder.addBinding(layer.params, "rotate", { min: 0, max: 1 }).on("change", renderLayers);
-        }
-        renderLayers();
-      });
-
-      folder.addButton({ title: "+ Kaleid" }).on("click", () => {
-        layer.effects.push({ fn: "kaleid", args: ["kaleidSides"] });
-        if (!("kaleidSides" in layer.params)) {
-          layer.params.kaleidSides = 3;
-          folder.addBinding(layer.params, "kaleidSides", { min: 1, max: 12 }).on("change", renderLayers);
-        }
-        renderLayers();
-      });
-    }
-
-    // ----------------------------
-    // Add layer buttons
-    // ----------------------------
-    const addButtons = pane.addFolder({ title: "Add Layer" });
-    addButtons.addButton({ title: "Osc → o0" }).on("click", () => createLayer("osc", o0));
-    addButtons.addButton({ title: "Voronoi → o1" }).on("click", () => createLayer("voronoi", o1));
-    addButtons.addButton({ title: "Shape → o2" }).on("click", () => createLayer("shape", o2));
-
-    // ----------------------------
-    // Initialize with bright visible oscillator
-    // ----------------------------
-    requestAnimationFrame(() => {
-      // Explicitly set brightness and color so osc is visible
-      osc(10, 0.2, 0).color(1, 1, 1).brightness(0.5).out(o0);
-      render(o0); // ensure buffer is displayed
-
-      // Add UI-managed layer
-      // createLayer("osc", o0);
-      renderLayers();
-    });
+    // --- Default bright oscillator layer ---
+    osc(10, 0.2, 0).color(1, 1, 1).brightness(0.5).out(o0);
+    addLayer('osc');
   </script>
 </body>
 </html>
