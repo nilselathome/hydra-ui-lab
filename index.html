@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Hydra Layer Mixer (Colorful Startup)</title>
+  <title>Hydra Layer Mixer (Instant Color)</title>
   <style>
     html, body {
       margin: 0;
@@ -111,7 +111,7 @@
         const def = layerDefs[layer.type];
         let node = window[layer.type](...def.args.map(a => layer.params[a.key]));
 
-        // Add color only if it's the base oscillator type
+        // Add color modulation based on type
         if (layer.type === 'osc') {
           node = node.colorama(0.5).hue(0.2).saturate(1.5);
         }
@@ -136,7 +136,7 @@
       }
     }
 
-    // --- Colorful rainbow-like default layer ---
+    // --- Colorful default layer ---
     osc(20, 0.05, 1.2)
       .colorama(0.4)
       .hue(0.3)
@@ -144,6 +144,10 @@
       .rotate(0.2, 0.1)
       .out(o0);
 
+    // ✅ Explicitly show the buffer
+    src(o0).out();
+
+    // Create layer in UI
     addLayer('osc');
   </script>
 </body>
