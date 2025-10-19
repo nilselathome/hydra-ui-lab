@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Hydra Layer Mixer — Working Default Layer</title>
+  <title>Hydra Playground — Live Layers</title>
   <style>
     html, body {
       margin: 0;
@@ -37,9 +37,13 @@
   <script type="module">
     import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
 
-    // --- Hydra setup ---
     const canvas = document.getElementById('hydraCanvas');
-    const hydra = new Hydra({ canvas, makeGlobal: true, detectAudio: false });
+    const hydra = new Hydra({
+      canvas,
+      makeGlobal: true,
+      detectAudio: false,
+      autoLoop: true, // important for time-based shaders
+    });
 
     const pane = new Pane({ container: document.getElementById('ui') });
 
@@ -77,7 +81,6 @@
     const outputs = [o0, o1, o2, o3];
     let layers = [];
 
-    // --- UI setup ---
     const addButtons = pane.addFolder({ title: 'Add Layer' });
     addButtons.addButton({ title: 'Oscillator' }).on('click', () => addLayer('osc'));
     addButtons.addButton({ title: 'Shape' }).on('click', () => addLayer('shape'));
@@ -99,7 +102,6 @@
       def.args.forEach(a => {
         f.addBinding(params, a.key, { min: a.min, max: a.max }).on('change', render);
       });
-
       f.addBinding(layer, 'blendMode', { options: blendOptions }).on('change', render);
 
       render();
@@ -108,20 +110,24 @@
     function render() {
       if (layers.length === 0) return;
 
-      // Draw each layer to its own buffer
       layers.forEach(layer => {
         const def = layerDefs[layer.type];
         let node = window[layer.type](...def.args.map(a => layer.params[a.key]));
 
-        // add some default coloring for visibility
-        if (layer.type === 'osc') node = node.colorama(0.4).hue(0.3).saturate(2.5);
-        if (layer.type === 'voronoi') node = node.color(1.2, 0.7, 1).saturate(1.2);
-        if (layer.type === 'shape') node = node.color(0.5, 1, 2).rotate(0.2, 0.1);
+        if (layer.type === 'osc') {
+          node = node.colorama(0.4).hue(0.3).saturate(2.5).rotate(0.1, 0.2);
+        }
+        if (layer.type === 'voronoi') {
+          node = node.color(1.2, 0.7, 1).saturate(1.2).scale(1.2);
+        }
+        if (layer.type === 'shape') {
+          node = node.color(0.5, 1, 2).rotate(0.2, 0.1);
+        }
 
         node.out(layer.output);
       });
 
-      // Combine all layers visually
+      // Combine visually
       let node = src(layers[0].output);
       for (let i = 1; i < layers.length; i++) {
         const mode = layers[i].blendMode;
@@ -131,11 +137,28 @@
       node.out();
     }
 
-    // --- Add a default colorful oscillator layer ---
-    addLayer('osc', { frequency: 20, sync: 0.05, offset: 1.2 });
+    // --- Default colorful animated base layer ---
+    addLayer('osc', { frequency: 15, sync: 0.1, offset: 0 });
+    layers[0].blendMode = 'add';
 
-    // Force draw after Hydra starts up
-    setTimeout(render, 100);
+    // Continuous animation
+    osc(15, 0.1, 0)
+      .color(1, 0.5, 0.2)
+      .rotate(0.2, 0.3)
+      .colorama(0.3)
+      .modulateRotate(osc(5, 0.1, 1.2), 0.2)
+      .saturate(2)
+      .out(o0);
+
+    src(o0).out();
+
+    // Hydra internal loop start
+    hydra.synth.tick = 0;
+    hydra.setResolution(window.innerWidth, window.innerHeight);
+    hydra.loop(true);
+
+    // Safety render after 200ms
+    setTimeout(render, 200);
   </script>
 </body>
 </html>
