@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Hydra Layer Mixer (Instant Color)</title>
+  <title>Hydra Layer Mixer — Working Default Layer</title>
   <style>
     html, body {
       margin: 0;
@@ -67,7 +67,6 @@
       },
     };
 
-    let layers = [];
     const blendOptions = {
       Add: 'add',
       Blend: 'blend',
@@ -76,6 +75,7 @@
     };
 
     const outputs = [o0, o1, o2, o3];
+    let layers = [];
 
     // --- UI setup ---
     const addButtons = pane.addFolder({ title: 'Add Layer' });
@@ -83,12 +83,12 @@
     addButtons.addButton({ title: 'Shape' }).on('click', () => addLayer('shape'));
     addButtons.addButton({ title: 'Voronoi' }).on('click', () => addLayer('voronoi'));
 
-    function addLayer(type) {
+    function addLayer(type, customParams) {
       const def = layerDefs[type];
       if (!def) return;
 
       const params = {};
-      def.args.forEach(a => (params[a.key] = a.default));
+      def.args.forEach(a => (params[a.key] = customParams?.[a.key] ?? a.default));
 
       const output = outputs[layers.length % outputs.length];
       const layer = { type, params, blendMode: 'add', output };
@@ -106,49 +106,36 @@
     }
 
     function render() {
+      if (layers.length === 0) return;
+
       // Draw each layer to its own buffer
       layers.forEach(layer => {
         const def = layerDefs[layer.type];
         let node = window[layer.type](...def.args.map(a => layer.params[a.key]));
 
-        // Add color modulation based on type
-        if (layer.type === 'osc') {
-          node = node.colorama(0.5).hue(0.2).saturate(1.5);
-        }
-        if (layer.type === 'voronoi') {
-          node = node.color(1.2, 0.7, 1).saturate(1.2);
-        }
-        if (layer.type === 'shape') {
-          node = node.color(0.5, 1, 2).rotate(0.2, 0.1);
-        }
+        // add some default coloring for visibility
+        if (layer.type === 'osc') node = node.colorama(0.4).hue(0.3).saturate(2.5);
+        if (layer.type === 'voronoi') node = node.color(1.2, 0.7, 1).saturate(1.2);
+        if (layer.type === 'shape') node = node.color(0.5, 1, 2).rotate(0.2, 0.1);
 
         node.out(layer.output);
       });
 
-      // Combine all layers
-      if (layers.length > 0) {
-        let node = src(layers[0].output);
-        for (let i = 1; i < layers.length; i++) {
-          const mode = layers[i].blendMode;
-          node = node[mode](src(layers[i].output), 0.5);
-        }
-        node.out();
+      // Combine all layers visually
+      let node = src(layers[0].output);
+      for (let i = 1; i < layers.length; i++) {
+        const mode = layers[i].blendMode;
+        node = node[mode](src(layers[i].output), 0.5);
       }
+
+      node.out();
     }
 
-    // --- Colorful default layer ---
-    osc(20, 0.05, 1.2)
-      .colorama(0.4)
-      .hue(0.3)
-      .saturate(2.5)
-      .rotate(0.2, 0.1)
-      .out(o0);
+    // --- Add a default colorful oscillator layer ---
+    addLayer('osc', { frequency: 20, sync: 0.05, offset: 1.2 });
 
-    // ✅ Explicitly show the buffer
-    src(o0).out();
-
-    // Create layer in UI
-    addLayer('osc');
+    // Force draw after Hydra starts up
+    setTimeout(render, 100);
   </script>
 </body>
 </html>
