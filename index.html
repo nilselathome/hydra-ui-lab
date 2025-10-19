@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Hydra Playground — Live Layers</title>
+  <title>Hydra Playground — Animated Layers</title>
   <style>
     html, body {
       margin: 0;
@@ -42,7 +42,7 @@
       canvas,
       makeGlobal: true,
       detectAudio: false,
-      autoLoop: true, // important for time-based shaders
+      autoLoop: true,
     });
 
     const pane = new Pane({ container: document.getElementById('ui') });
@@ -81,6 +81,7 @@
     const outputs = [o0, o1, o2, o3];
     let layers = [];
 
+    // === UI setup ===
     const addButtons = pane.addFolder({ title: 'Add Layer' });
     addButtons.addButton({ title: 'Oscillator' }).on('click', () => addLayer('osc'));
     addButtons.addButton({ title: 'Shape' }).on('click', () => addLayer('shape'));
@@ -114,20 +115,17 @@
         const def = layerDefs[layer.type];
         let node = window[layer.type](...def.args.map(a => layer.params[a.key]));
 
-        if (layer.type === 'osc') {
+        // add some default coloring
+        if (layer.type === 'osc')
           node = node.colorama(0.4).hue(0.3).saturate(2.5).rotate(0.1, 0.2);
-        }
-        if (layer.type === 'voronoi') {
+        if (layer.type === 'voronoi')
           node = node.color(1.2, 0.7, 1).saturate(1.2).scale(1.2);
-        }
-        if (layer.type === 'shape') {
+        if (layer.type === 'shape')
           node = node.color(0.5, 1, 2).rotate(0.2, 0.1);
-        }
 
         node.out(layer.output);
       });
 
-      // Combine visually
       let node = src(layers[0].output);
       for (let i = 1; i < layers.length; i++) {
         const mode = layers[i].blendMode;
@@ -137,28 +135,22 @@
       node.out();
     }
 
-    // --- Default colorful animated base layer ---
-    addLayer('osc', { frequency: 15, sync: 0.1, offset: 0 });
-    layers[0].blendMode = 'add';
+    // === Default colorful animated layer ===
+    addLayer('osc', { frequency: 10, sync: 0.15, offset: 0 });
 
-    // Continuous animation
+    // Explicitly set a visible, animated rainbow pattern
     osc(15, 0.1, 0)
-      .color(1, 0.5, 0.2)
-      .rotate(0.2, 0.3)
-      .colorama(0.3)
-      .modulateRotate(osc(5, 0.1, 1.2), 0.2)
+      .rotate(0.2, 0.1)
+      .modulateRotate(osc(10, 0.3, 0.8), 0.2)
+      .color(1, 0.3, 0.7)
+      .colorama(0.6)
       .saturate(2)
       .out(o0);
 
     src(o0).out();
 
-    // Hydra internal loop start
-    hydra.synth.tick = 0;
-    hydra.setResolution(window.innerWidth, window.innerHeight);
-    hydra.loop(true);
-
-    // Safety render after 200ms
-    setTimeout(render, 200);
+    // Force an initial render after Hydra context stabilizes
+    setTimeout(render, 150);
   </script>
 </body>
 </html>
