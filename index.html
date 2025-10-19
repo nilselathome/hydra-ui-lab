@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Hydra Playground — Animated Layers</title>
+  <title>Hydra Playground — Base Layer + Live Layers</title>
   <style>
     html, body {
       margin: 0;
@@ -26,6 +26,8 @@
       border-radius: 12px;
       color: white;
       font-family: sans-serif;
+      max-height: 90vh;
+      overflow-y: auto;
     }
   </style>
 </head>
@@ -37,6 +39,7 @@
   <script type="module">
     import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
 
+    // === Hydra setup ===
     const canvas = document.getElementById('hydraCanvas');
     const hydra = new Hydra({
       canvas,
@@ -47,6 +50,7 @@
 
     const pane = new Pane({ container: document.getElementById('ui') });
 
+    // === Layer definitions ===
     const layerDefs = {
       osc: {
         args: [
@@ -81,8 +85,38 @@
     const outputs = [o0, o1, o2, o3];
     let layers = [];
 
-    // === UI setup ===
-    const addButtons = pane.addFolder({ title: 'Add Layer' });
+    // === Base Layer ===
+    const baseParams = {
+      frequency: 15,
+      hueShift: 0.3,
+      saturation: 2.0,
+      rotationSpeed: 0.2,
+    };
+
+    const baseFolder = pane.addFolder({ title: '🎨 Base Layer' });
+    baseFolder.addBinding(baseParams, 'frequency', { min: 0, max: 30 });
+    baseFolder.addBinding(baseParams, 'hueShift', { min: 0, max: 1 });
+    baseFolder.addBinding(baseParams, 'saturation', { min: 0, max: 3 });
+    baseFolder.addBinding(baseParams, 'rotationSpeed', { min: 0, max: 1 });
+
+    baseFolder.on('change', renderBase);
+
+    function renderBase() {
+      osc(baseParams.frequency, 0.1, 0)
+        .rotate(() => time * baseParams.rotationSpeed)
+        .modulateRotate(osc(10, 0.3, 0.8), 0.2)
+        .color(1, 0.3, 0.7)
+        .colorama(baseParams.hueShift)
+        .saturate(baseParams.saturation)
+        .out(o0);
+
+      src(o0).out();
+    }
+
+    renderBase(); // visible immediately
+
+    // === Addable layers ===
+    const addButtons = pane.addFolder({ title: '➕ Add Layer' });
     addButtons.addButton({ title: 'Oscillator' }).on('click', () => addLayer('osc'));
     addButtons.addButton({ title: 'Shape' }).on('click', () => addLayer('shape'));
     addButtons.addButton({ title: 'Voronoi' }).on('click', () => addLayer('voronoi'));
@@ -94,7 +128,7 @@
       const params = {};
       def.args.forEach(a => (params[a.key] = customParams?.[a.key] ?? a.default));
 
-      const output = outputs[layers.length % outputs.length];
+      const output = outputs[(layers.length + 1) % outputs.length]; // +1 to skip o0 (base)
       const layer = { type, params, blendMode: 'add', output };
 
       layers.push(layer);
@@ -109,13 +143,11 @@
     }
 
     function render() {
-      if (layers.length === 0) return;
-
+      // Draw each extra layer
       layers.forEach(layer => {
         const def = layerDefs[layer.type];
         let node = window[layer.type](...def.args.map(a => layer.params[a.key]));
 
-        // add some default coloring
         if (layer.type === 'osc')
           node = node.colorama(0.4).hue(0.3).saturate(2.5).rotate(0.1, 0.2);
         if (layer.type === 'voronoi')
@@ -126,31 +158,15 @@
         node.out(layer.output);
       });
 
-      let node = src(layers[0].output);
-      for (let i = 1; i < layers.length; i++) {
+      // Combine base (o0) + all other layers
+      let node = src(o0);
+      for (let i = 0; i < layers.length; i++) {
         const mode = layers[i].blendMode;
         node = node[mode](src(layers[i].output), 0.5);
       }
 
       node.out();
     }
-
-    // === Default colorful animated layer ===
-    addLayer('osc', { frequency: 10, sync: 0.15, offset: 0 });
-
-    // Explicitly set a visible, animated rainbow pattern
-    osc(15, 0.1, 0)
-      .rotate(0.2, 0.1)
-      .modulateRotate(osc(10, 0.3, 0.8), 0.2)
-      .color(1, 0.3, 0.7)
-      .colorama(0.6)
-      .saturate(2)
-      .out(o0);
-
-    src(o0).out();
-
-    // Force an initial render after Hydra context stabilizes
-    setTimeout(render, 150);
   </script>
 </body>
 </html>
