@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Hydra Layer Mixer</title>
+  <title>Hydra Layer Mixer (Fixed Blend Modes)</title>
   <style>
     html, body {
       margin: 0;
@@ -68,12 +68,16 @@
     };
 
     let layers = [];
-    const blendModes = ['add', 'blend', 'mult', 'diff'];
+    const blendOptions = {
+      Add: 'add',
+      Blend: 'blend',
+      Multiply: 'mult',
+      Difference: 'diff',
+    };
 
-    // Hydra has o0-o3; we’ll assign one per layer
     const outputs = [o0, o1, o2, o3];
 
-    // --- UI setup ---
+    // --- UI ---
     const addButtons = pane.addFolder({ title: 'Add Layer' });
     addButtons.addButton({ title: 'Oscillator' }).on('click', () => addLayer('osc'));
     addButtons.addButton({ title: 'Shape' }).on('click', () => addLayer('shape'));
@@ -85,25 +89,25 @@
 
       const params = {};
       def.args.forEach(a => (params[a.key] = a.default));
-      const blendMode = 'add';
-      const output = outputs[layers.length % outputs.length];
 
-      const layer = { type, params, blendMode, output };
+      const output = outputs[layers.length % outputs.length];
+      const layer = { type, params, blendMode: 'add', output };
+
       layers.push(layer);
 
       const f = pane.addFolder({ title: `Layer ${layers.length}: ${type}` });
       def.args.forEach(a => {
         f.addBinding(params, a.key, { min: a.min, max: a.max }).on('change', render);
       });
-      f.addBinding(layer, 'blendMode', { options: blendModes }).on('change', render);
+
+      f.addBinding(layer, 'blendMode', { options: blendOptions }).on('change', render);
 
       render();
     }
 
-    // --- Render all layers ---
     function render() {
       // Draw each layer to its own buffer
-      layers.forEach((layer, i) => {
+      layers.forEach(layer => {
         const def = layerDefs[layer.type];
         let node = window[layer.type](...def.args.map(a => layer.params[a.key]));
         node.color(1, 1, 1).brightness(0.5).out(layer.output);
@@ -113,13 +117,14 @@
       if (layers.length > 0) {
         let node = src(layers[0].output);
         for (let i = 1; i < layers.length; i++) {
-          node = node[layers[i].blendMode](src(layers[i].output), 0.5);
+          const mode = layers[i].blendMode;
+          node = node[mode](src(layers[i].output), 0.5);
         }
         node.out();
       }
     }
 
-    // --- Default bright oscillator layer ---
+    // --- Default visible oscillator layer ---
     osc(10, 0.2, 0).color(1, 1, 1).brightness(0.5).out(o0);
     addLayer('osc');
   </script>
