@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Hydra Playground — Base Layer + Dynamic Layers</title>
+  <title>Hydra Playground — Working Base + Layers</title>
   <style>
     html, body { margin: 0; padding: 0; background: black; height: 100%; overflow: hidden; }
     canvas { width: 100vw; height: 100vh; display: block; }
@@ -34,7 +34,7 @@
 
     const pane = new Pane({ container: document.getElementById("ui") });
 
-    // === Base Layer parameters & folder ===
+    // === Base Layer parameters ===
     const baseParams = {
       frequency: 15,
       hueShift: 0.3,
@@ -84,15 +84,20 @@
     addButtons.addButton({ title: "Shape" }).on("click", () => addLayer("shape"));
     addButtons.addButton({ title: "Voronoi" }).on("click", () => addLayer("voronoi"));
 
+    // === Base Layer render function ===
     function renderBase() {
-      osc(baseParams.frequency, 0.1, 0)
+      const node = osc(baseParams.frequency, 0.1, 0)
         .rotate(() => time * baseParams.rotationSpeed)
         .modulateRotate(osc(10, 0.3, 0.8), 0.2)
         .color(1, 0.3, 0.7)
         .colorama(baseParams.hueShift)
-        .saturate(baseParams.saturation)
-        .out(o0);
+        .saturate(baseParams.saturation);
+
+      node.out(o0);
       src(o0).out();
+
+      // Combine with dynamic layers
+      renderDynamicLayers();
     }
 
     function addLayer(type, customParams) {
@@ -107,38 +112,37 @@
       layers.push(layer);
 
       const f = pane.addFolder({ title: `Layer ${layers.length}: ${type}` });
-      def.args.forEach(a => {
-        f.addBinding(params, a.key, { min: a.min, max: a.max }).on("change", render);
-      });
-      f.addBinding(layer, "blendMode", { options: blendOptions }).on("change", render);
+      def.args.forEach(a => f.addBinding(params, a.key, { min: a.min, max: a.max }).on("change", renderBase));
+      f.addBinding(layer, "blendMode", { options: blendOptions }).on("change", renderBase);
 
-      render();
+      renderBase();
     }
 
-    function render() {
+    function renderDynamicLayers() {
       layers.forEach(layer => {
         const def = layerDefs[layer.type];
         let node = window[layer.type](...def.args.map(a => layer.params[a.key]));
         if (layer.type === "osc")
           node = node.colorama(0.4).hue(0.3).saturate(2.5).rotate(0.1, 0.2);
         if (layer.type === "voronoi")
-          node = node.color(1.2, 0.7, 1).saturate(1.2).scale(1.2);
+          node = node.color(1.2,0.7,1).saturate(1.2).scale(1.2);
         if (layer.type === "shape")
-          node = node.color(0.5, 1, 2).rotate(0.2, 0.1);
+          node = node.color(0.5,1,2).rotate(0.2,0.1);
         node.out(layer.output);
       });
 
-      // Combine base + dynamic layers
+      // Combine base + layers
       let node = src(o0);
-      for (let i = 0; i < layers.length; i++) {
+      for (let i=0;i<layers.length;i++){
         const mode = layers[i].blendMode;
-        node = node[mode](src(layers[i].output), 0.5);
+        node = node[mode](src(layers[i].output),0.5);
       }
       node.out();
     }
 
-    // === Ensure the base layer is drawn after Hydra context is ready ===
-    setTimeout(renderBase, 300); // 300ms delay guarantees GL context ready
+    // === Delay initial render to ensure Hydra GL context is ready ===
+    setTimeout(renderBase, 500);
+
   </script>
 </body>
 </html>
