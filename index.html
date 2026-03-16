@@ -2,22 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Hydra Playground — Working Base + Layers</title>
+  <title>Hydra Playground</title>
   <style>
-    html, body { margin: 0; padding: 0; background: black; height: 100%; overflow: hidden; }
-    canvas { width: 100vw; height: 100vh; display: block; }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hidden; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+
     #ui {
       position: fixed;
-      top: 10px;
-      left: 10px;
+      top: 12px;
+      right: 12px;
       z-index: 9999;
-      background: rgba(0,0,0,0.5);
-      padding: 8px;
-      border-radius: 12px;
-      color: white;
-      font-family: sans-serif;
-      max-height: 90vh;
+      max-height: calc(100vh - 24px);
       overflow-y: auto;
+      /* Tweakpane renders inside here */
     }
   </style>
 </head>
@@ -26,123 +24,6 @@
   <div id="ui"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/hydra-synth@1.3.29/dist/hydra-synth.min.js"></script>
-  <script type="module">
-    import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
-
-    const canvas = document.getElementById("hydraCanvas");
-    const hydra = new Hydra({ canvas, detectAudio: false, makeGlobal: true });
-
-    const pane = new Pane({ container: document.getElementById("ui") });
-
-    // === Base Layer parameters ===
-    const baseParams = {
-      frequency: 15,
-      hueShift: 0.3,
-      saturation: 2.0,
-      rotationSpeed: 0.2
-    };
-
-    const baseFolder = pane.addFolder({ title: "🎨 Base Layer" });
-    baseFolder.addBinding(baseParams, "frequency", { min: 0, max: 30 });
-    baseFolder.addBinding(baseParams, "hueShift", { min: 0, max: 1 });
-    baseFolder.addBinding(baseParams, "saturation", { min: 0, max: 3 });
-    baseFolder.addBinding(baseParams, "rotationSpeed", { min: 0, max: 1 });
-    baseFolder.on("change", renderBase);
-
-    // === Dynamic layers definitions ===
-    const layerDefs = {
-      osc: {
-        args: [
-          { key: "frequency", min: 0, max: 60, default: 10 },
-          { key: "sync", min: 0, max: 1, default: 0.2 },
-          { key: "offset", min: -1, max: 1, default: 0 }
-        ]
-      },
-      shape: {
-        args: [
-          { key: "sides", min: 3, max: 12, default: 3 },
-          { key: "radius", min: 0, max: 1, default: 0.5 },
-          { key: "smoothing", min: 0, max: 1, default: 0.01 }
-        ]
-      },
-      voronoi: {
-        args: [
-          { key: "scale", min: 1, max: 50, default: 5 },
-          { key: "speed", min: 0, max: 2, default: 0.1 },
-          { key: "blend", min: 0, max: 1, default: 0.3 }
-        ]
-      }
-    };
-
-    const blendOptions = { Add: "add", Blend: "blend", Multiply: "mult", Difference: "diff" };
-    const outputs = [o0, o1, o2, o3];
-    let layers = [];
-
-    // === Add Layer buttons ===
-    const addButtons = pane.addFolder({ title: "➕ Add Layer" });
-    addButtons.addButton({ title: "Oscillator" }).on("click", () => addLayer("osc"));
-    addButtons.addButton({ title: "Shape" }).on("click", () => addLayer("shape"));
-    addButtons.addButton({ title: "Voronoi" }).on("click", () => addLayer("voronoi"));
-
-    // === Base Layer render function ===
-    function renderBase() {
-      const node = osc(baseParams.frequency, 0.1, 0)
-        .rotate(() => time * baseParams.rotationSpeed)
-        .modulateRotate(osc(10, 0.3, 0.8), 0.2)
-        .color(1, 0.3, 0.7)
-        .colorama(baseParams.hueShift)
-        .saturate(baseParams.saturation);
-
-      node.out(o0);
-      src(o0).out();
-
-      // Combine with dynamic layers
-      renderDynamicLayers();
-    }
-
-    function addLayer(type, customParams) {
-      const def = layerDefs[type];
-      if (!def) return;
-
-      const params = {};
-      def.args.forEach(a => (params[a.key] = customParams?.[a.key] ?? a.default));
-
-      const output = outputs[(layers.length + 1) % outputs.length];
-      const layer = { type, params, blendMode: "add", output };
-      layers.push(layer);
-
-      const f = pane.addFolder({ title: `Layer ${layers.length}: ${type}` });
-      def.args.forEach(a => f.addBinding(params, a.key, { min: a.min, max: a.max }).on("change", renderBase));
-      f.addBinding(layer, "blendMode", { options: blendOptions }).on("change", renderBase);
-
-      renderBase();
-    }
-
-    function renderDynamicLayers() {
-      layers.forEach(layer => {
-        const def = layerDefs[layer.type];
-        let node = window[layer.type](...def.args.map(a => layer.params[a.key]));
-        if (layer.type === "osc")
-          node = node.colorama(0.4).hue(0.3).saturate(2.5).rotate(0.1, 0.2);
-        if (layer.type === "voronoi")
-          node = node.color(1.2,0.7,1).saturate(1.2).scale(1.2);
-        if (layer.type === "shape")
-          node = node.color(0.5,1,2).rotate(0.2,0.1);
-        node.out(layer.output);
-      });
-
-      // Combine base + layers
-      let node = src(o0);
-      for (let i=0;i<layers.length;i++){
-        const mode = layers[i].blendMode;
-        node = node[mode](src(layers[i].output),0.5);
-      }
-      node.out();
-    }
-
-    // === Delay initial render to ensure Hydra GL context is ready ===
-    setTimeout(renderBase, 500);
-
-  </script>
+  <script type="module" src="/src/app.js"></script>
 </body>
 </html>
