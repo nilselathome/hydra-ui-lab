@@ -67,7 +67,7 @@ function buildUI() {
     });
 
     // Layer controls
-    const controls = f.addFolder({ title: 'Layer', expanded: false });
+    const controls = f.addFolder({ title: 'Layer', expanded: true });
     if (!atFront) {
       controls.addButton({ title: '▲ Move Forward' }).on('click', () => {
         moveLayer(layer.id, 1);

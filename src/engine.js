@@ -10,6 +10,12 @@ export function render(layers) {
   const visible = layers.filter(l => l.visible).slice(0, MAX_LAYERS);
   if (visible.length === 0) return;
 
+  // Single layer: render directly to screen, no buffer needed
+  if (visible.length === 1) {
+    LAYER_TYPES[visible[0].type].build(visible[0].params).out();
+    return;
+  }
+
   const outs = getOutputs();
 
   // Render each layer into its own output buffer
@@ -18,7 +24,6 @@ export function render(layers) {
   });
 
   // Composite bottom → top
-  // Index 0 is the base; each subsequent layer blends on top
   let composite = src(outs[0]);
   for (let i = 1; i < visible.length; i++) {
     const layer = visible[i];
