@@ -6,13 +6,23 @@ const MAX_LAYERS = 4;
 // o0-o3 are Hydra globals injected after new Hydra({ makeGlobal: true })
 const getOutputs = () => [o0, o1, o2, o3];
 
+function buildLayer(layer) {
+  let node = LAYER_TYPES[layer.type].build(layer.params);
+  const m = layer.mod;
+  if (m.enabled) {
+    const modSrc = LAYER_TYPES[m.src].build(m.srcParams);
+    node = node[m.fn](modSrc, m.amount);
+  }
+  return node;
+}
+
 export function render(layers) {
   const visible = layers.filter(l => l.visible).slice(0, MAX_LAYERS);
   if (visible.length === 0) return;
 
   // Single layer: render directly to screen, no buffer needed
   if (visible.length === 1) {
-    LAYER_TYPES[visible[0].type].build(visible[0].params).out();
+    buildLayer(visible[0]).out();
     return;
   }
 
@@ -20,7 +30,7 @@ export function render(layers) {
 
   // Render each layer into its own output buffer
   visible.forEach((layer, i) => {
-    LAYER_TYPES[layer.type].build(layer.params).out(outs[i]);
+    buildLayer(layer).out(outs[i]);
   });
 
   // Composite bottom → top

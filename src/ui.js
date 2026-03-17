@@ -1,6 +1,6 @@
 import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
-import { LAYER_TYPES, BLEND_MODES } from './layerDefs.js';
-import { getLayers, addLayer, removeLayer, moveLayer } from './layers.js';
+import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS } from './layerDefs.js';
+import { getLayers, addLayer, removeLayer, moveLayer, resetModSrcParams } from './layers.js';
 import { render } from './engine.js';
 
 let pane = null;
@@ -64,6 +64,42 @@ function buildUI() {
       const opts = { label: p.label, min: p.min, max: p.max };
       if (p.step) opts.step = p.step;
       f.addBinding(layer.params, p.key, opts).on('change', onChange);
+    });
+
+    // ── Modulate ──────────────────────────────────────────────
+    const modFolder = f.addFolder({ title: 'Modulate', expanded: layer.mod._expanded });
+    modFolder.on('fold', (ev) => { layer.mod._expanded = ev.expanded; });
+
+    modFolder.addBinding(layer.mod, 'enabled', { label: 'Enable' }).on('change', onChange);
+
+    const fnOptions = Object.fromEntries(
+      Object.entries(MOD_FNS).map(([k, v]) => [v.label, k])
+    );
+    modFolder.addBinding(layer.mod, 'fn', { label: 'Type', options: fnOptions })
+      .on('change', () => {
+        layer.mod._expanded = true;
+        rebuild();
+      });
+
+    const srcOptions = Object.fromEntries(
+      MOD_SOURCES.map(k => [LAYER_TYPES[k].label, k])
+    );
+    modFolder.addBinding(layer.mod, 'src', { label: 'Source', options: srcOptions })
+      .on('change', (ev) => {
+        layer.mod._expanded = true;
+        resetModSrcParams(layer, ev.value);
+        rebuild();
+      });
+
+    const fnCfg = MOD_FNS[layer.mod.fn];
+    modFolder.addBinding(layer.mod, 'amount', {
+      label: 'Amount', min: fnCfg.min, max: fnCfg.max, step: fnCfg.step,
+    }).on('change', onChange);
+
+    LAYER_TYPES[layer.mod.src].params.forEach(p => {
+      const opts = { label: p.label, min: p.min, max: p.max };
+      if (p.step) opts.step = p.step;
+      modFolder.addBinding(layer.mod.srcParams, p.key, opts).on('change', onChange);
     });
 
     // Layer controls

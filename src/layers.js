@@ -1,10 +1,33 @@
-import { LAYER_TYPES } from './layerDefs.js';
+import { LAYER_TYPES, MOD_SOURCES } from './layerDefs.js';
 
 let layers = [];
 let nextId = 1;
 
 export function getLayers() {
   return layers;
+}
+
+function defaultModParams(srcType) {
+  const p = {};
+  LAYER_TYPES[srcType].params.forEach(def => { p[def.key] = def.default; });
+  return p;
+}
+
+function createMod() {
+  const src = MOD_SOURCES[0]; // noise
+  return {
+    enabled: false,
+    fn: 'modulate',
+    src,
+    amount: 0.1,
+    srcParams: defaultModParams(src),
+    _expanded: false,
+  };
+}
+
+export function resetModSrcParams(layer, newSrc) {
+  layer.mod.src = newSrc;
+  layer.mod.srcParams = defaultModParams(newSrc);
 }
 
 export function addLayer(type, overrides = {}) {
@@ -22,6 +45,7 @@ export function addLayer(type, overrides = {}) {
     opacity: 0.5,
     blendMode: 'add',
     params,
+    mod: createMod(),
   };
   layers.push(layer);
   return layer;

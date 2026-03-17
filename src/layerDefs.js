@@ -58,3 +58,15 @@ export const BLEND_MODES = {
   mult:  'Multiply',
   diff:  'Difference',
 };
+
+// Source types available as modulation inputs
+export const MOD_SOURCES = ['noise', 'voronoi', 'osc', 'gradient'];
+
+// Modulation functions: key = Hydra method name, value = UI config
+export const MOD_FNS = {
+  modulate:       { label: 'Displace',  min: -1,  max: 1,  step: 0.01 },
+  modulateHue:    { label: 'Hue',       min: -1,  max: 1,  step: 0.01 },
+  modulateScale:  { label: 'Scale',     min: -2,  max: 2,  step: 0.01 },
+  modulateRotate: { label: 'Rotate',    min: -1,  max: 1,  step: 0.01 },
+  modulateKaleid: { label: 'Kaleid',    min: 2,   max: 20, step: 1    },
+};
