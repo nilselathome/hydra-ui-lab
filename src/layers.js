@@ -1,4 +1,4 @@
-import { LAYER_TYPES, MOD_SOURCES } from './layerDefs.js';
+import { LAYER_TYPES, MOD_SOURCES, TRANSFORM_TYPES } from './layerDefs.js';
 
 let layers = [];
 let nextId = 1;
@@ -13,6 +13,17 @@ function defaultModParams(srcType) {
   return p;
 }
 
+export function createTransform(type = 'rotate') {
+  const params = {};
+  TRANSFORM_TYPES[type].params.forEach(p => { params[p.key] = p.default; });
+  return {
+    type,
+    params,
+    animate: { enabled: false, mode: 'loop', speed: 0.5, _expanded: true },
+    _expanded: true,
+  };
+}
+
 export function createMod() {
   const src = MOD_SOURCES[0]; // noise
   return {
@@ -21,6 +32,7 @@ export function createMod() {
     src,
     amount: 0.1,
     srcParams: defaultModParams(src),
+    animate: { enabled: false, mode: 'loop', speed: 0.5, _expanded: true },
     _expanded: true,
   };
 }
@@ -45,6 +57,7 @@ export function addLayer(type, overrides = {}) {
     opacity: 0.5,
     blendMode: 'blend',
     params,
+    transforms: [],
     mods: [],
   };
   layers.push(layer);

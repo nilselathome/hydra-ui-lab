@@ -1,16 +1,42 @@
-import { LAYER_TYPES } from './layerDefs.js';
+import { LAYER_TYPES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
 
-// Hydra only has 4 output buffers. Visible layers beyond 4 are silently ignored.
-const MAX_LAYERS = 4;
+// o0 is reserved for the final composite (it's what the canvas displays by default).
+// Layers render into o1-o3 so the composite never reads its own output (no feedback loop).
+const MAX_LAYERS = 3;
 
-// o0-o3 are Hydra globals injected after new Hydra({ makeGlobal: true })
-const getOutputs = () => [o0, o1, o2, o3];
+const getLayerOutputs = () => [o1, o2, o3];
+
+function animatedValue(animate, min, max) {
+  const range = max - min;
+  if (animate.mode === 'sin')
+    return () => min + (Math.sin(time * animate.speed) * 0.5 + 0.5) * range;
+  return () => min + ((time * animate.speed) % range);
+}
+
+function buildTransform(node, transform) {
+  const def = TRANSFORM_TYPES[transform.type];
+  const p = { ...transform.params };
+  if (transform.animate.enabled) {
+    const first = def.params[0];
+    p[first.key] = animatedValue(transform.animate, first.min, first.max);
+  }
+  return def.build(node, p);
+}
+
+function modAmount(mod) {
+  if (!mod.animate.enabled) return mod.amount;
+  const { min, max } = MOD_FNS[mod.fn];
+  return animatedValue(mod.animate, min, max);
+}
 
 function buildLayer(layer) {
   let node = LAYER_TYPES[layer.type].build(layer.params);
+  for (const t of layer.transforms) {
+    node = buildTransform(node, t);
+  }
   for (const m of layer.mods) {
     if (m.enabled) {
-      node = node[m.fn](LAYER_TYPES[m.src].build(m.srcParams), m.amount);
+      node = node[m.fn](LAYER_TYPES[m.src].build(m.srcParams), modAmount(m));
     }
   }
   return node;
@@ -20,24 +46,18 @@ export function render(layers) {
   const visible = layers.filter(l => l.visible).slice(0, MAX_LAYERS);
   if (visible.length === 0) return;
 
-  // Single layer: render directly to screen, no buffer needed
-  if (visible.length === 1) {
-    buildLayer(visible[0]).out();
-    return;
-  }
+  const outs = getLayerOutputs();
 
-  const outs = getOutputs();
-
-  // Render each layer into its own output buffer
+  // Render each layer into its own buffer (o1-o3)
   visible.forEach((layer, i) => {
     buildLayer(layer).out(outs[i]);
   });
 
-  // Composite bottom → top
+  // Composite bottom → top, write to o0 (canvas)
   let composite = src(outs[0]);
   for (let i = 1; i < visible.length; i++) {
     const layer = visible[i];
     composite = composite[layer.blendMode](src(outs[i]), layer.opacity);
   }
-  composite.out();
+  composite.out(o0);
 }

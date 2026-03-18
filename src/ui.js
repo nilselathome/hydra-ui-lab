@@ -1,6 +1,6 @@
 import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
-import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS } from './layerDefs.js';
-import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams } from './layers.js';
+import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
+import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform } from './layers.js';
 import { render } from './engine.js';
 
 let addPane = null;
@@ -67,6 +67,56 @@ function buildLayersUI() {
       f.addBinding(layer.params, p.key, opts).on('change', onChange);
     });
 
+    // ── Transforms ────────────────────────────────────────────
+    const transformTypeOptions = Object.fromEntries(
+      Object.entries(TRANSFORM_TYPES).map(([k, v]) => [v.label, k])
+    );
+
+    layer.transforms.forEach((transform, tIdx) => {
+      const tDef = TRANSFORM_TYPES[transform.type];
+      const tFolder = f.addFolder({ title: tDef.label, expanded: transform._expanded });
+      tFolder.on('fold', (ev) => { transform._expanded = ev.expanded; });
+
+      tFolder.addBinding(transform, 'type', { label: 'Type', options: transformTypeOptions })
+        .on('change', (ev) => {
+          transform._expanded = true;
+          const newDef = TRANSFORM_TYPES[ev.value];
+          transform.params = {};
+          newDef.params.forEach(p => { transform.params[p.key] = p.default; });
+          rebuild();
+        });
+
+      if (!transform.animate.enabled) {
+        TRANSFORM_TYPES[transform.type].params.forEach(p => {
+          const opts = { label: p.label, min: p.min, max: p.max };
+          if (p.step) opts.step = p.step;
+          tFolder.addBinding(transform.params, p.key, opts).on('change', onChange);
+        });
+      }
+
+      const tAnimFolder = tFolder.addFolder({ title: 'Animate', expanded: transform.animate._expanded });
+      tAnimFolder.on('fold', (ev) => { transform.animate._expanded = ev.expanded; });
+      tAnimFolder.addBinding(transform.animate, 'enabled', { label: 'Enable' })
+        .on('change', () => { transform._expanded = true; transform.animate._expanded = true; rebuild(); });
+      if (transform.animate.enabled) {
+        tAnimFolder.addBinding(transform.animate, 'mode', {
+          label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin' },
+        }).on('change', onChange);
+        tAnimFolder.addBinding(transform.animate, 'speed', { label: 'Speed', min: 0.01, max: 5, step: 0.01 })
+          .on('change', onChange);
+      }
+
+      tFolder.addButton({ title: '✕ Remove' }).on('click', () => {
+        layer.transforms.splice(tIdx, 1);
+        rebuild();
+      });
+    });
+
+    f.addButton({ title: '+ Add Transform' }).on('click', () => {
+      layer.transforms.push(createTransform('rotate'));
+      rebuild();
+    });
+
     // ── Modulations ───────────────────────────────────────────
     const fnOptions = Object.fromEntries(
       Object.entries(MOD_FNS).map(([k, v]) => [v.label, k])
@@ -92,9 +142,23 @@ function buildLayersUI() {
         });
 
       const fnCfg = MOD_FNS[mod.fn];
-      modFolder.addBinding(mod, 'amount', {
-        label: 'Amount', min: fnCfg.min, max: fnCfg.max, step: fnCfg.step,
-      }).on('change', onChange);
+      if (!mod.animate.enabled) {
+        modFolder.addBinding(mod, 'amount', {
+          label: 'Amount', min: fnCfg.min, max: fnCfg.max, step: fnCfg.step,
+        }).on('change', onChange);
+      }
+
+      const animFolder = modFolder.addFolder({ title: 'Animate', expanded: mod.animate._expanded });
+      animFolder.on('fold', (ev) => { mod.animate._expanded = ev.expanded; });
+      animFolder.addBinding(mod.animate, 'enabled', { label: 'Enable' })
+        .on('change', () => { mod._expanded = true; mod.animate._expanded = true; rebuild(); });
+      if (mod.animate.enabled) {
+        animFolder.addBinding(mod.animate, 'mode', {
+          label: 'Mode', options: { 'Loop (0→max)': 'loop', 'Sine (↕)': 'sin' },
+        }).on('change', onChange);
+        animFolder.addBinding(mod.animate, 'speed', { label: 'Speed', min: 0.01, max: 5, step: 0.01 })
+          .on('change', onChange);
+      }
 
       LAYER_TYPES[mod.src].params.forEach(p => {
         const opts = { label: p.label, min: p.min, max: p.max };

@@ -67,9 +67,45 @@ export const MOD_SOURCES = ['noise', 'voronoi', 'osc', 'gradient'];
 
 // Modulation functions: key = Hydra method name, value = UI config
 export const MOD_FNS = {
-  modulate:       { label: 'Displace',  min: -1,  max: 1,  step: 0.01 },
-  modulateHue:    { label: 'Hue',       min: -1,  max: 1,  step: 0.01 },
-  modulateScale:  { label: 'Scale',     min: -2,  max: 2,  step: 0.01 },
-  modulateRotate: { label: 'Rotate',    min: -1,  max: 1,  step: 0.01 },
-  modulateKaleid: { label: 'Kaleid',    min: 2,   max: 20, step: 1    },
+  modulate:       { label: 'Displace',     min: -1,  max: 1,  step: 0.01 },
+  modulateHue:    { label: 'Hue',          min: -1,  max: 1,  step: 0.01 },
+  modulateScale:  { label: 'Scale',        min: -2,  max: 2,  step: 0.01 },
+  modulateRotate: { label: 'Warp Rotate',  min: -1,  max: 1,  step: 0.01 },
+  modulateKaleid: { label: 'Warp Kaleid',  min: 2,   max: 20, step: 1    },
+};
+
+// Geometry/color transforms applied directly to a layer's source chain
+// build(node, p) — p values may be functions when animate is on (Hydra handles this natively)
+export const TRANSFORM_TYPES = {
+  rotate: {
+    label: 'Rotate',
+    params: [{ key: 'angle', label: 'Angle', min: -3.14, max: 3.14, step: 0.01, default: 0 }],
+    build: (node, p) => node.rotate(p.angle),
+  },
+  scale: {
+    label: 'Scale',
+    params: [{ key: 'amount', label: 'Amount', min: 0, max: 4, step: 0.01, default: 1 }],
+    build: (node, p) => node.scale(p.amount),
+  },
+  kaleid: {
+    label: 'Kaleid',
+    params: [{ key: 'nSides', label: 'Sides', min: 2, max: 20, step: 1, default: 4 }],
+    build: (node, p) => node.kaleid(p.nSides),
+  },
+  pixelate: {
+    label: 'Pixelate',
+    params: [
+      { key: 'pixelX', label: 'X', min: 1, max: 200, step: 1, default: 20 },
+      { key: 'pixelY', label: 'Y', min: 1, max: 200, step: 1, default: 20 },
+    ],
+    build: (node, p) => node.pixelate(p.pixelX, p.pixelY),
+  },
+  scroll: {
+    label: 'Scroll',
+    params: [
+      { key: 'scrollX', label: 'X', min: -1, max: 1, step: 0.01, default: 0 },
+      { key: 'scrollY', label: 'Y', min: -1, max: 1, step: 0.01, default: 0 },
+    ],
+    build: (node, p) => node.scroll(p.scrollX, p.scrollY),
+  },
 };
