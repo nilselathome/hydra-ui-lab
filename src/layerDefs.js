@@ -49,6 +49,14 @@ export const LAYER_TYPES = {
     ],
     build: (p) => gradient(p.speed),
   },
+
+  // Special source: reads the previous frame's composite from o0 — creates feedback/trails
+  feedback: {
+    label: 'Feedback',
+    noLayer: true,
+    params: [],
+    build: () => src(o0),
+  },
 };
 
 // Keys must match Hydra method names (used directly as node[blendMode](src, amount))
@@ -62,11 +70,19 @@ export const BLEND_MODES = {
   mask:  'Mask',
 };
 
-// Source types available as modulation inputs
-export const MOD_SOURCES = ['noise', 'voronoi', 'osc', 'gradient'];
+// Source types available as mod inputs (includes feedback)
+export const MOD_SOURCES = ['noise', 'voronoi', 'osc', 'gradient', 'feedback'];
 
-// Modulation functions: key = Hydra method name, value = UI config
+// Mod functions: key = Hydra method name, value = UI config
+// Includes both color blend ops and coordinate modulations
 export const MOD_FNS = {
+  // Color blend (these + feedback = self-feedback chain)
+  blend:          { label: 'Blend',        min: 0,   max: 1,  step: 0.01 },
+  add:            { label: 'Add',          min: 0,   max: 1,  step: 0.01 },
+  mult:           { label: 'Multiply',     min: 0,   max: 1,  step: 0.01 },
+  diff:           { label: 'Difference',   min: 0,   max: 1,  step: 0.01 },
+  sub:            { label: 'Subtract',     min: 0,   max: 1,  step: 0.01 },
+  // Coordinate modulations
   modulate:       { label: 'Displace',     min: -1,  max: 1,  step: 0.01 },
   modulateHue:    { label: 'Hue',          min: -1,  max: 1,  step: 0.01 },
   modulateScale:  { label: 'Scale',        min: -2,  max: 2,  step: 0.01 },

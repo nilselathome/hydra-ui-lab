@@ -9,6 +9,7 @@ let layersPane = null;
 export function initUI(container) {
   addPane = new Pane({ container, title: 'Add Layer' });
   Object.entries(LAYER_TYPES).forEach(([type, def]) => {
+    if (def.noLayer) return;
     addPane.addButton({ title: def.label }).on('click', () => {
       addLayer(type);
       rebuild();
