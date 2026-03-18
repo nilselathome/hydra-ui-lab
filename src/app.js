@@ -12,7 +12,5 @@ new Hydra({ canvas, detectAudio: false, makeGlobal: true });
 setTimeout(() => {
   initUI(document.getElementById('ui'));
 
-  // Start with a gradient as the base layer
-  addLayer('gradient');
   render(getLayers());
 }, 500);

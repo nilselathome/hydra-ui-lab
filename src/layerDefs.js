@@ -53,10 +53,13 @@ export const LAYER_TYPES = {
 
 // Keys must match Hydra method names (used directly as node[blendMode](src, amount))
 export const BLEND_MODES = {
-  add:   'Add',
   blend: 'Normal',
+  add:   'Add',
+  sub:   'Subtract',
   mult:  'Multiply',
   diff:  'Difference',
+  layer: 'Layer',
+  mask:  'Mask',
 };
 
 // Source types available as modulation inputs

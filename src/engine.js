@@ -8,10 +8,10 @@ const getOutputs = () => [o0, o1, o2, o3];
 
 function buildLayer(layer) {
   let node = LAYER_TYPES[layer.type].build(layer.params);
-  const m = layer.mod;
-  if (m.enabled) {
-    const modSrc = LAYER_TYPES[m.src].build(m.srcParams);
-    node = node[m.fn](modSrc, m.amount);
+  for (const m of layer.mods) {
+    if (m.enabled) {
+      node = node[m.fn](LAYER_TYPES[m.src].build(m.srcParams), m.amount);
+    }
   }
   return node;
 }

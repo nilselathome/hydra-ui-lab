@@ -1,13 +1,22 @@
 import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
 import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS } from './layerDefs.js';
-import { getLayers, addLayer, removeLayer, moveLayer, resetModSrcParams } from './layers.js';
+import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams } from './layers.js';
 import { render } from './engine.js';
 
-let pane = null;
+let addPane = null;
+let layersPane = null;
 
 export function initUI(container) {
-  pane = new Pane({ container });
-  buildUI();
+  addPane = new Pane({ container, title: 'Add Layer' });
+  Object.entries(LAYER_TYPES).forEach(([type, def]) => {
+    addPane.addButton({ title: def.label }).on('click', () => {
+      addLayer(type);
+      rebuild();
+    });
+  });
+
+  layersPane = new Pane({ container, title: 'Layers' });
+  buildLayersUI();
 }
 
 function onChange() {
@@ -15,35 +24,27 @@ function onChange() {
 }
 
 function rebuild() {
-  buildUI();
+  buildLayersUI();
   render(getLayers());
 }
 
-function buildUI() {
-  // Clear all existing pane children
-  while (pane.children.length > 0) {
-    pane.remove(pane.children[0]);
+function buildLayersUI() {
+  while (layersPane.children.length > 0) {
+    layersPane.remove(layersPane.children[0]);
   }
 
-  // ── Add Layer ──────────────────────────────────────────────
-  const addFolder = pane.addFolder({ title: 'Add Layer', expanded: true });
-  Object.entries(LAYER_TYPES).forEach(([type, def]) => {
-    addFolder.addButton({ title: def.label }).on('click', () => {
-      addLayer(type);
-      rebuild();
-    });
-  });
+  const layers = getLayers();
+  if (layers.length === 0) return;
 
   // ── Layer list (Photoshop order: top of panel = front of stack) ──
-  const layers = getLayers();
-  const displayOrder = [...layers].reverse(); // index 0 = front (last rendered)
+  const displayOrder = [...layers].reverse();
 
   displayOrder.forEach((layer) => {
     const arrayIdx = layers.indexOf(layer);
     const isBase = arrayIdx === 0;
     const atFront = arrayIdx === layers.length - 1;
 
-    const f = pane.addFolder({ title: layer.name, expanded: true });
+    const f = layersPane.addFolder({ title: layer.name, expanded: true });
 
     // Visibility toggle
     f.addBinding(layer, 'visible', { label: 'Visible' }).on('change', onChange);
@@ -66,40 +67,50 @@ function buildUI() {
       f.addBinding(layer.params, p.key, opts).on('change', onChange);
     });
 
-    // ── Modulate ──────────────────────────────────────────────
-    const modFolder = f.addFolder({ title: 'Modulate', expanded: layer.mod._expanded });
-    modFolder.on('fold', (ev) => { layer.mod._expanded = ev.expanded; });
-
-    modFolder.addBinding(layer.mod, 'enabled', { label: 'Enable' }).on('change', onChange);
-
+    // ── Modulations ───────────────────────────────────────────
     const fnOptions = Object.fromEntries(
       Object.entries(MOD_FNS).map(([k, v]) => [v.label, k])
     );
-    modFolder.addBinding(layer.mod, 'fn', { label: 'Type', options: fnOptions })
-      .on('change', () => {
-        layer.mod._expanded = true;
-        rebuild();
-      });
-
     const srcOptions = Object.fromEntries(
       MOD_SOURCES.map(k => [LAYER_TYPES[k].label, k])
     );
-    modFolder.addBinding(layer.mod, 'src', { label: 'Source', options: srcOptions })
-      .on('change', (ev) => {
-        layer.mod._expanded = true;
-        resetModSrcParams(layer, ev.value);
-        rebuild();
+
+    layer.mods.forEach((mod, modIdx) => {
+      const modFolder = f.addFolder({ title: `Mod ${modIdx + 1}`, expanded: mod._expanded });
+      modFolder.on('fold', (ev) => { mod._expanded = ev.expanded; });
+
+      modFolder.addBinding(mod, 'enabled', { label: 'Enable' }).on('change', onChange);
+
+      modFolder.addBinding(mod, 'fn', { label: 'Type', options: fnOptions })
+        .on('change', () => { mod._expanded = true; rebuild(); });
+
+      modFolder.addBinding(mod, 'src', { label: 'Source', options: srcOptions })
+        .on('change', (ev) => {
+          mod._expanded = true;
+          resetModSrcParams(mod, ev.value);
+          rebuild();
+        });
+
+      const fnCfg = MOD_FNS[mod.fn];
+      modFolder.addBinding(mod, 'amount', {
+        label: 'Amount', min: fnCfg.min, max: fnCfg.max, step: fnCfg.step,
+      }).on('change', onChange);
+
+      LAYER_TYPES[mod.src].params.forEach(p => {
+        const opts = { label: p.label, min: p.min, max: p.max };
+        if (p.step) opts.step = p.step;
+        modFolder.addBinding(mod.srcParams, p.key, opts).on('change', onChange);
       });
 
-    const fnCfg = MOD_FNS[layer.mod.fn];
-    modFolder.addBinding(layer.mod, 'amount', {
-      label: 'Amount', min: fnCfg.min, max: fnCfg.max, step: fnCfg.step,
-    }).on('change', onChange);
+      modFolder.addButton({ title: '✕ Remove Mod' }).on('click', () => {
+        layer.mods.splice(modIdx, 1);
+        rebuild();
+      });
+    });
 
-    LAYER_TYPES[layer.mod.src].params.forEach(p => {
-      const opts = { label: p.label, min: p.min, max: p.max };
-      if (p.step) opts.step = p.step;
-      modFolder.addBinding(layer.mod.srcParams, p.key, opts).on('change', onChange);
+    f.addButton({ title: '+ Add Modulation' }).on('click', () => {
+      layer.mods.push(createMod());
+      rebuild();
     });
 
     // Layer controls
@@ -115,10 +126,10 @@ function buildUI() {
         moveLayer(layer.id, -1);
         rebuild();
       });
-      controls.addButton({ title: '✕ Remove' }).on('click', () => {
-        removeLayer(layer.id);
-        rebuild();
-      });
     }
+    controls.addButton({ title: '✕ Remove' }).on('click', () => {
+      removeLayer(layer.id);
+      rebuild();
+    });
   });
 }

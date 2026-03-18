@@ -13,21 +13,21 @@ function defaultModParams(srcType) {
   return p;
 }
 
-function createMod() {
+export function createMod() {
   const src = MOD_SOURCES[0]; // noise
   return {
-    enabled: false,
+    enabled: true,
     fn: 'modulate',
     src,
     amount: 0.1,
     srcParams: defaultModParams(src),
-    _expanded: false,
+    _expanded: true,
   };
 }
 
-export function resetModSrcParams(layer, newSrc) {
-  layer.mod.src = newSrc;
-  layer.mod.srcParams = defaultModParams(newSrc);
+export function resetModSrcParams(mod, newSrc) {
+  mod.src = newSrc;
+  mod.srcParams = defaultModParams(newSrc);
 }
 
 export function addLayer(type, overrides = {}) {
@@ -43,9 +43,9 @@ export function addLayer(type, overrides = {}) {
     name: def.label,
     visible: true,
     opacity: 0.5,
-    blendMode: 'add',
+    blendMode: 'blend',
     params,
-    mod: createMod(),
+    mods: [],
   };
   layers.push(layer);
   return layer;
