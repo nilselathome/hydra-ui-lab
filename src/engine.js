@@ -25,12 +25,11 @@ function buildTransform(node, transform) {
 
 function modAmount(mod) {
   if (!mod.animate.enabled) return mod.amount;
-  const { min, max } = MOD_FNS[mod.fn];
-  return animatedValue(mod.animate, min, max);
+  return animatedValue(mod.animate, mod.animate.min, mod.animate.max);
 }
 
 function buildLayer(layer) {
-  let node = LAYER_TYPES[layer.type].build(layer.params);
+  let node = LAYER_TYPES[layer.type].build(layer.params, layer);
   for (const t of layer.transforms) {
     node = buildTransform(node, t);
   }

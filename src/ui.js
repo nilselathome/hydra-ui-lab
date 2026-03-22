@@ -29,6 +29,53 @@ export function initUI(container) {
   buildLayersUI();
 }
 
+function addImageDropZone(folder, layer) {
+  const content = folder.element.querySelector('.tp-fldv_c') ?? folder.element;
+
+  const zone = document.createElement('div');
+  zone.style.cssText = `
+    border: 1px dashed rgba(255,255,255,0.2);
+    border-radius: 2px;
+    padding: 12px 8px;
+    margin: 4px 4px 2px;
+    text-align: center;
+    color: rgba(255,255,255,0.35);
+    font-size: 10px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  `;
+  zone.textContent = layer._hydraSource ? '↓ Drop image or click to browse' : '⚠ No source slots available';
+
+  if (!layer._hydraSource) { content.appendChild(zone); return; }
+
+  const highlight = (on) => {
+    zone.style.borderColor = on ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)';
+    zone.style.color       = on ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)';
+  };
+
+  const loadFile = (file) => {
+    if (!file?.type.startsWith('image/')) return;
+    const url = URL.createObjectURL(file);
+    layer._hydraSource.initImage(url);
+    zone.textContent = `✓ ${file.name}`;
+    render(getLayers());
+  };
+
+  zone.addEventListener('dragover',  (e) => { e.preventDefault(); highlight(true); });
+  zone.addEventListener('dragleave', ()  => highlight(false));
+  zone.addEventListener('drop',      (e) => { e.preventDefault(); highlight(false); loadFile(e.dataTransfer.files[0]); });
+  zone.addEventListener('click', () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e) => loadFile(e.target.files[0]);
+    input.click();
+  });
+
+  content.appendChild(zone);
+}
+
 function onChange() {
   render(getLayers());
 }
@@ -69,6 +116,9 @@ function buildLayersUI() {
       f.addBinding(layer, 'opacity', { label: 'Opacity', min: 0, max: 1 })
         .on('change', onChange);
     }
+
+    // Image drop zone
+    if (layer.type === 'img') addImageDropZone(f, layer);
 
     // Type-specific params
     LAYER_TYPES[layer.type].params.forEach(p => {
@@ -149,7 +199,13 @@ function buildLayersUI() {
       modFolder.addBinding(mod, 'enabled', { label: 'Enable' }).on('change', onChange);
 
       modFolder.addBinding(mod, 'fn', { label: 'Type', options: fnOptions })
-        .on('change', () => { mod._expanded = true; rebuild(); });
+        .on('change', (ev) => {
+          mod._expanded = true;
+          const cfg = MOD_FNS[ev.value];
+          mod.animate.min = cfg.min;
+          mod.animate.max = cfg.max;
+          rebuild();
+        });
 
       modFolder.addBinding(mod, 'src', { label: 'Source', options: srcOptions })
         .on('change', (ev) => {
@@ -170,6 +226,10 @@ function buildLayersUI() {
       animFolder.addBinding(mod.animate, 'enabled', { label: 'Enable' })
         .on('change', () => { mod._expanded = true; mod.animate._expanded = true; rebuild(); });
       if (mod.animate.enabled) {
+        animFolder.addBinding(mod.animate, 'min', { label: 'Min', min: fnCfg.min, max: fnCfg.max, step: fnCfg.step })
+          .on('change', onChange);
+        animFolder.addBinding(mod.animate, 'max', { label: 'Max', min: fnCfg.min, max: fnCfg.max, step: fnCfg.step })
+          .on('change', onChange);
         animFolder.addBinding(mod.animate, 'mode', {
           label: 'Mode', options: { 'Loop (0→max)': 'loop', 'Sine (↕)': 'sin' },
         }).on('change', onChange);

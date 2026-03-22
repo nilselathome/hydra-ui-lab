@@ -1,7 +1,17 @@
-import { LAYER_TYPES, MOD_SOURCES, TRANSFORM_TYPES } from './layerDefs.js';
+import { LAYER_TYPES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
 
 let layers = [];
 let nextId = 1;
+
+// s0–s3 are Hydra globals for external media sources (images, video, cam)
+const usedSlots = new Set();
+function allocateSlot() {
+  for (let i = 0; i < 4; i++) {
+    if (!usedSlots.has(i)) { usedSlots.add(i); return i; }
+  }
+  return null;
+}
+function freeSlot(i) { usedSlots.delete(i); }
 
 export function getLayers() {
   return layers;
@@ -29,13 +39,14 @@ export function createTransform(type = 'rotate') {
 
 export function createMod() {
   const src = MOD_SOURCES[0]; // noise
+  const fnCfg = MOD_FNS['modulate'];
   return {
     enabled: true,
     fn: 'modulate',
     src,
     amount: 0.1,
     srcParams: defaultModParams(src),
-    animate: { enabled: false, mode: 'loop', speed: 0.5, _expanded: true },
+    animate: { enabled: false, mode: 'loop', speed: 0.5, min: fnCfg.min, max: fnCfg.max, _expanded: true },
     _expanded: true,
   };
 }
@@ -63,11 +74,19 @@ export function addLayer(type, overrides = {}) {
     transforms: [],
     mods: [],
   };
+  if (type === 'img') {
+    const slot = allocateSlot();
+    layer._hydraSlot = slot;
+    layer._hydraSource = slot !== null ? window[`s${slot}`] : null;
+  }
+
   layers.push(layer);
   return layer;
 }
 
 export function removeLayer(id) {
+  const layer = layers.find(l => l.id === id);
+  if (layer?._hydraSlot != null) freeSlot(layer._hydraSlot);
   layers = layers.filter(l => l.id !== id);
 }
 

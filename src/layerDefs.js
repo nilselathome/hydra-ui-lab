@@ -60,6 +60,15 @@ export const LAYER_TYPES = {
     build: (p) => gradient(p.speed),
   },
 
+  img: {
+    label: 'Image',
+    shortLabel: 'Img',
+    icon: 'ph-image',
+    params: [],
+    // layer._hydraSource is an s0–s3 slot assigned at layer creation
+    build: (p, layer) => layer._hydraSource ? src(layer._hydraSource) : solid(0, 0, 0),
+  },
+
   // Special source: reads the previous frame's composite from o0 — creates feedback/trails
   feedback: {
     label: 'Feedback',
