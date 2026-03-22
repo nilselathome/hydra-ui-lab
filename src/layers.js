@@ -13,15 +13,18 @@ function defaultModParams(srcType) {
   return p;
 }
 
+export function createTransformAnimate(type) {
+  const animate = {};
+  TRANSFORM_TYPES[type].params.forEach(p => {
+    animate[p.key] = { enabled: false, mode: 'loop', speed: 0.5, min: p.min, max: p.max, _expanded: true };
+  });
+  return animate;
+}
+
 export function createTransform(type = 'rotate') {
   const params = {};
   TRANSFORM_TYPES[type].params.forEach(p => { params[p.key] = p.default; });
-  return {
-    type,
-    params,
-    animate: { enabled: false, mode: 'loop', speed: 0.5, _expanded: true },
-    _expanded: true,
-  };
+  return { type, params, animate: createTransformAnimate(type), _expanded: true };
 }
 
 export function createMod() {

@@ -1,6 +1,6 @@
 import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
 import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
-import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform } from './layers.js';
+import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate } from './layers.js';
 import { render } from './engine.js';
 
 let addPane = null;
@@ -10,10 +10,19 @@ export function initUI(container) {
   addPane = new Pane({ container, title: 'Add Layer' });
   Object.entries(LAYER_TYPES).forEach(([type, def]) => {
     if (def.noLayer) return;
-    addPane.addButton({ title: def.label }).on('click', () => {
+    const btn = addPane.addButton({ title: def.shortLabel ?? def.label }).on('click', () => {
       addLayer(type);
       rebuild();
     });
+    if (def.icon) {
+      const textEl = btn.element.querySelector('button')?.firstElementChild;
+      if (textEl) {
+        const i = document.createElement('i');
+        i.className = `ph-bold ${def.icon}`;
+        i.style.cssText = 'margin-right: 6px; vertical-align: middle;';
+        textEl.prepend(i);
+      }
+    }
   });
 
   layersPane = new Pane({ container, title: 'Layers' });
@@ -84,28 +93,35 @@ function buildLayersUI() {
           const newDef = TRANSFORM_TYPES[ev.value];
           transform.params = {};
           newDef.params.forEach(p => { transform.params[p.key] = p.default; });
+          transform.animate = createTransformAnimate(ev.value);
           rebuild();
         });
 
-      if (!transform.animate.enabled) {
-        TRANSFORM_TYPES[transform.type].params.forEach(p => {
+      tDef.params.forEach(p => {
+        const anim = transform.animate[p.key];
+        if (!anim.enabled) {
           const opts = { label: p.label, min: p.min, max: p.max };
           if (p.step) opts.step = p.step;
           tFolder.addBinding(transform.params, p.key, opts).on('change', onChange);
-        });
-      }
-
-      const tAnimFolder = tFolder.addFolder({ title: 'Animate', expanded: transform.animate._expanded });
-      tAnimFolder.on('fold', (ev) => { transform.animate._expanded = ev.expanded; });
-      tAnimFolder.addBinding(transform.animate, 'enabled', { label: 'Enable' })
-        .on('change', () => { transform._expanded = true; transform.animate._expanded = true; rebuild(); });
-      if (transform.animate.enabled) {
-        tAnimFolder.addBinding(transform.animate, 'mode', {
-          label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin' },
-        }).on('change', onChange);
-        tAnimFolder.addBinding(transform.animate, 'speed', { label: 'Speed', min: 0.01, max: 5, step: 0.01 })
-          .on('change', onChange);
-      }
+        }
+        const animTitle = tDef.params.length > 1 ? `Animate ${p.label}` : 'Animate';
+        const tAnimFolder = tFolder.addFolder({ title: animTitle, expanded: anim._expanded });
+        tAnimFolder.on('fold', (ev) => { anim._expanded = ev.expanded; });
+        tAnimFolder.addBinding(anim, 'enabled', { label: 'Enable' })
+          .on('change', () => { transform._expanded = true; anim._expanded = true; rebuild(); });
+        if (anim.enabled) {
+          const step = p.step ?? 0.01;
+          tAnimFolder.addBinding(anim, 'min', { label: 'Min', min: p.min, max: p.max, step })
+            .on('change', onChange);
+          tAnimFolder.addBinding(anim, 'max', { label: 'Max', min: p.min, max: p.max, step })
+            .on('change', onChange);
+          tAnimFolder.addBinding(anim, 'mode', {
+            label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin' },
+          }).on('change', onChange);
+          tAnimFolder.addBinding(anim, 'speed', { label: 'Speed', min: 0.01, max: 5, step: 0.01 })
+            .on('change', onChange);
+        }
+      });
 
       tFolder.addButton({ title: '✕ Remove' }).on('click', () => {
         layer.transforms.splice(tIdx, 1);

@@ -16,10 +16,10 @@ function animatedValue(animate, min, max) {
 function buildTransform(node, transform) {
   const def = TRANSFORM_TYPES[transform.type];
   const p = { ...transform.params };
-  if (transform.animate.enabled) {
-    const first = def.params[0];
-    p[first.key] = animatedValue(transform.animate, first.min, first.max);
-  }
+  def.params.forEach(param => {
+    const anim = transform.animate[param.key];
+    if (anim?.enabled) p[param.key] = animatedValue(anim, anim.min, anim.max);
+  });
   return def.build(node, p);
 }
 

@@ -5,6 +5,8 @@
 export const LAYER_TYPES = {
   osc: {
     label: 'Oscillator',
+    shortLabel: 'Osc',
+    icon: 'ph-wave-sine',
     params: [
       { key: 'freq',   label: 'Frequency', min: 0,  max: 60, default: 10 },
       { key: 'sync',   label: 'Sync',      min: 0,  max: 1,  default: 0.1 },
@@ -15,6 +17,8 @@ export const LAYER_TYPES = {
 
   shape: {
     label: 'Shape',
+    shortLabel: 'Shape',
+    icon: 'ph-polygon',
     params: [
       { key: 'sides',  label: 'Sides',     min: 3, max: 12, default: 3, step: 1 },
       { key: 'radius', label: 'Radius',    min: 0, max: 1,  default: 0.5 },
@@ -25,6 +29,8 @@ export const LAYER_TYPES = {
 
   voronoi: {
     label: 'Voronoi',
+    shortLabel: 'Voronoi',
+    icon: 'ph-graph',
     params: [
       { key: 'scale',    label: 'Scale',    min: 1, max: 50, default: 5 },
       { key: 'speed',    label: 'Speed',    min: 0, max: 2,  default: 0.3 },
@@ -35,6 +41,8 @@ export const LAYER_TYPES = {
 
   noise: {
     label: 'Noise',
+    shortLabel: 'Noise',
+    icon: 'ph-cloud',
     params: [
       { key: 'scale',  label: 'Scale',  min: 0, max: 20, default: 3 },
       { key: 'offset', label: 'Offset', min: 0, max: 1,  default: 0.1 },
@@ -44,6 +52,8 @@ export const LAYER_TYPES = {
 
   gradient: {
     label: 'Gradient',
+    shortLabel: 'Grad',
+    icon: 'ph-gradient',
     params: [
       { key: 'speed', label: 'Speed', min: 0, max: 2, default: 0.1 },
     ],
