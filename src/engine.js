@@ -8,6 +8,8 @@ const getLayerOutputs = () => [o1, o2, o3];
 
 function animatedValue(animate, min, max) {
   const range = max - min;
+  if (animate.mode === 'audio')
+    return () => min + (a.fft[animate.band ?? 0] ?? 0) * range;
   if (animate.mode === 'sin')
     return () => min + (Math.sin(time * animate.speed) * 0.5 + 0.5) * range;
   return () => min + ((time * animate.speed) % range);

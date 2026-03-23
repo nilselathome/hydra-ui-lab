@@ -26,7 +26,7 @@ function defaultModParams(srcType) {
 export function createTransformAnimate(type) {
   const animate = {};
   TRANSFORM_TYPES[type].params.forEach(p => {
-    animate[p.key] = { enabled: false, mode: 'loop', speed: 0.5, min: p.min, max: p.max, _expanded: true };
+    animate[p.key] = { enabled: false, mode: 'loop', speed: 0.5, min: p.min, max: p.max, band: 0, _expanded: true };
   });
   return animate;
 }
@@ -46,7 +46,7 @@ export function createMod() {
     src,
     amount: 0.1,
     srcParams: defaultModParams(src),
-    animate: { enabled: false, mode: 'loop', speed: 0.5, min: fnCfg.min, max: fnCfg.max, _expanded: true },
+    animate: { enabled: false, mode: 'loop', speed: 0.5, min: fnCfg.min, max: fnCfg.max, band: 0, _expanded: true },
     _expanded: true,
   };
 }

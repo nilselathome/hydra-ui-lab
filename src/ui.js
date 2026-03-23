@@ -3,16 +3,18 @@ import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from 
 import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate } from './layers.js';
 import { render, MAX_LAYERS } from './engine.js';
 import { saveToUrl, showWarning } from './state.js';
+import * as Audio from './audio.js';
 
 let addPane = null;
 let layersPane = null;
 let addButtons = [];
 let uiContainer = null;
-let addPaneExpanded = true;
+let addPaneExpanded   = true;
+let audioPaneExpanded = true;
 let layersPaneExpanded = true;
 
 function save() {
-  saveToUrl(getLayers(), { addPane: addPaneExpanded, layersPane: layersPaneExpanded });
+  saveToUrl(getLayers(), { addPane: addPaneExpanded, audioPane: audioPaneExpanded, layersPane: layersPaneExpanded });
 }
 
 export function initUI(container, uiState = {}) {
@@ -41,10 +43,66 @@ export function initUI(container, uiState = {}) {
     }
   });
 
+  initAudioPane(container, uiState);
+
   layersPane = new Pane({ container, title: 'Layers', expanded: layersPaneExpanded });
   layersPane.element.style.marginTop = '1rem';
   layersPane.on('fold', (ev) => { layersPaneExpanded = ev.expanded; save(); });
   buildLayersUI();
+}
+
+function initAudioPane(container, uiState = {}) {
+  audioPaneExpanded = uiState.audioPane ?? true;
+  const pane = new Pane({ container, title: 'Audio', expanded: audioPaneExpanded });
+  pane.element.style.marginTop = '1rem';
+  pane.on('fold', (ev) => { audioPaneExpanded = ev.expanded; save(); });
+
+  const smoothingObj = { smoothing: 0.8 };
+
+  const runAsync = async (fn) => {
+    try { await fn(); }
+    catch (e) { showWarning(e.message ?? 'Audio error'); }
+  };
+
+  pane.addButton({ title: 'Mic' }).on('click', () => runAsync(Audio.connectMic));
+  pane.addButton({ title: 'Tab / Screen audio' }).on('click', () => runAsync(Audio.connectTab));
+  pane.addButton({ title: 'Stop' }).on('click', () => Audio.stop());
+
+  pane.addBinding(smoothingObj, 'smoothing', { label: 'Smoothing', min: 0, max: 1, step: 0.01 })
+    .on('change', () => Audio.setSmoothing(smoothingObj.smoothing));
+
+  // Audio file drop zone — appended after Tweakpane controls so it sits at the bottom
+  const zone = document.createElement('div');
+  zone.style.cssText = `
+    border: 1px dashed rgba(255,255,255,0.2); border-radius: 2px;
+    padding: 10px 8px; margin: 4px 4px 2px;
+    text-align: center; color: rgba(255,255,255,0.35);
+    font-size: 10px; font-family: inherit; cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  `;
+  zone.textContent = '↓ Drop audio file or click to browse';
+
+  const highlight = (on) => {
+    zone.style.borderColor = on ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)';
+    zone.style.color       = on ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)';
+  };
+  const loadFile = (file) => {
+    if (!file?.type.startsWith('audio/')) { showWarning('Please drop an audio file.'); return; }
+    Audio.connectFile(file);
+  };
+
+  zone.addEventListener('dragover',  (e) => { e.preventDefault(); highlight(true); });
+  zone.addEventListener('dragleave', ()  => highlight(false));
+  zone.addEventListener('drop',      (e) => { e.preventDefault(); highlight(false); loadFile(e.dataTransfer.files[0]); });
+  zone.addEventListener('click', () => {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = 'audio/*';
+    input.onchange = (e) => loadFile(e.target.files[0]);
+    input.click();
+  });
+  pane.element.appendChild(zone);
+
+  Audio.setStatusCallback((_, label) => { zone.textContent = label; });
 }
 
 function addImageDropZone(folder, layer) {
@@ -235,10 +293,16 @@ function buildLayersUI() {
           tAnimFolder.addBinding(anim, 'max', { label: 'Max', min: p.min, max: p.max, step })
             .on('change', onChange);
           tAnimFolder.addBinding(anim, 'mode', {
-            label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin' },
-          }).on('change', onChange);
-          tAnimFolder.addBinding(anim, 'speed', { label: 'Speed', min: 0.01, max: 5, step: 0.01 })
-            .on('change', onChange);
+            label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Audio': 'audio' },
+          }).on('change', () => { anim._expanded = true; rebuild(); });
+          if (anim.mode === 'audio') {
+            tAnimFolder.addBinding(anim, 'band', {
+              label: 'Band', options: { 'Bass': 0, 'Low Mid': 1, 'High Mid': 2, 'Treble': 3 },
+            }).on('change', onChange);
+          } else {
+            tAnimFolder.addBinding(anim, 'speed', { label: 'Speed', min: 0.01, max: 5, step: 0.01 })
+              .on('change', onChange);
+          }
         }
       });
 
@@ -300,10 +364,16 @@ function buildLayersUI() {
         animFolder.addBinding(mod.animate, 'max', { label: 'Max', min: fnCfg.min, max: fnCfg.max, step: fnCfg.step })
           .on('change', onChange);
         animFolder.addBinding(mod.animate, 'mode', {
-          label: 'Mode', options: { 'Loop (0→max)': 'loop', 'Sine (↕)': 'sin' },
-        }).on('change', onChange);
-        animFolder.addBinding(mod.animate, 'speed', { label: 'Speed', min: 0.01, max: 5, step: 0.01 })
-          .on('change', onChange);
+          label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Audio': 'audio' },
+        }).on('change', () => { mod.animate._expanded = true; rebuild(); });
+        if (mod.animate.mode === 'audio') {
+          animFolder.addBinding(mod.animate, 'band', {
+            label: 'Band', options: { 'Bass': 0, 'Low Mid': 1, 'High Mid': 2, 'Treble': 3 },
+          }).on('change', onChange);
+        } else {
+          animFolder.addBinding(mod.animate, 'speed', { label: 'Speed', min: 0.01, max: 5, step: 0.01 })
+            .on('change', onChange);
+        }
       }
 
       LAYER_TYPES[mod.src].params.forEach(p => {

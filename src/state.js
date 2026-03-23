@@ -7,7 +7,7 @@ const URL_LENGTH_LIMIT = 8000;
 function serializeTransform(t) {
   const animate = {};
   Object.entries(t.animate).forEach(([k, v]) => {
-    animate[k] = { enabled: v.enabled, mode: v.mode, speed: v.speed, min: v.min, max: v.max, _expanded: v._expanded };
+    animate[k] = { enabled: v.enabled, mode: v.mode, speed: v.speed, min: v.min, max: v.max, band: v.band ?? 0, _expanded: v._expanded };
   });
   return { type: t.type, params: { ...t.params }, animate, _expanded: t._expanded };
 }
@@ -19,7 +19,7 @@ function serializeMod(m) {
     src: m.src,
     amount: m.amount,
     srcParams: { ...m.srcParams },
-    animate: { enabled: m.animate.enabled, mode: m.animate.mode, speed: m.animate.speed, min: m.animate.min, max: m.animate.max, _expanded: m.animate._expanded },
+    animate: { enabled: m.animate.enabled, mode: m.animate.mode, speed: m.animate.speed, min: m.animate.min, max: m.animate.max, band: m.animate.band ?? 0, _expanded: m.animate._expanded },
     _expanded: m._expanded,
   };
 }
@@ -52,6 +52,7 @@ function deserializeTransform(data) {
       speed:     saved.speed     ?? 0.5,
       min:       saved.min       ?? p.min,
       max:       saved.max       ?? p.max,
+      band:      saved.band      ?? 0,
       _expanded: saved._expanded ?? true,
     };
   });
@@ -72,6 +73,7 @@ function deserializeMod(data) {
       speed:     data.animate?.speed     ?? 0.5,
       min:       data.animate?.min       ?? fnCfg.min,
       max:       data.animate?.max       ?? fnCfg.max,
+      band:      data.animate?.band      ?? 0,
       _expanded: data.animate?._expanded ?? true,
     },
     _expanded: data._expanded ?? true,
