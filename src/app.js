@@ -1,7 +1,7 @@
-import { addLayer } from './layers.js';
+import { getLayers, applyState } from './layers.js';
 import { render } from './engine.js';
 import { initUI } from './ui.js';
-import { getLayers } from './layers.js';
+import { loadFromUrl, deserializeLayers } from './state.js';
 
 const canvas = document.getElementById('hydraCanvas');
 
@@ -10,7 +10,9 @@ new Hydra({ canvas, detectAudio: false, makeGlobal: true });
 
 // Hydra needs a tick before the GL context is ready to accept chains
 setTimeout(() => {
-  initUI(document.getElementById('ui'));
+  const savedData = loadFromUrl();
+  if (savedData) applyState(deserializeLayers(savedData));
 
+  initUI(document.getElementById('ui'));
   render(getLayers());
 }, 500);

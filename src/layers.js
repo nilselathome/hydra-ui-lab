@@ -73,11 +73,13 @@ export function addLayer(type, overrides = {}) {
     params,
     transforms: [],
     mods: [],
+    _expanded: true,
   };
   if (type === 'img') {
     const slot = allocateSlot();
     layer._hydraSlot = slot;
     layer._hydraSource = slot !== null ? window[`s${slot}`] : null;
+    layer.imgUrl = '';
   }
 
   layers.push(layer);
@@ -88,6 +90,27 @@ export function removeLayer(id) {
   const layer = layers.find(l => l.id === id);
   if (layer?._hydraSlot != null) freeSlot(layer._hydraSlot);
   layers = layers.filter(l => l.id !== id);
+}
+
+export function applyState(dataArray) {
+  // Clear existing state
+  layers = [];
+  usedSlots.clear();
+  nextId = 1;
+
+  dataArray.forEach(data => {
+    const layer = addLayer(data.type);
+    layer.visible   = data.visible   ?? true;
+    layer.opacity   = data.opacity   ?? 0.5;
+    layer.blendMode = data.blendMode ?? 'blend';
+    Object.assign(layer.params, data.params ?? {});
+    layer.transforms = data.transforms ?? [];
+    layer.mods       = data.mods       ?? [];
+    if (data.type === 'img' && data.imgUrl) {
+      layer.imgUrl = data.imgUrl;
+      layer._hydraSource?.initImage(data.imgUrl);
+    }
+  });
 }
 
 // dir: 1 = move toward front (higher index), -1 = move toward back (lower index)

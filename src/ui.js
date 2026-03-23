@@ -2,11 +2,14 @@ import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpan
 import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
 import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate } from './layers.js';
 import { render } from './engine.js';
+import { saveToUrl, showWarning } from './state.js';
 
 let addPane = null;
 let layersPane = null;
+let uiContainer = null;
 
 export function initUI(container) {
+  uiContainer = container;
   addPane = new Pane({ container, title: 'Add Layer' });
   Object.entries(LAYER_TYPES).forEach(([type, def]) => {
     if (def.noLayer) return;
@@ -49,6 +52,46 @@ function addImageDropZone(folder, layer) {
 
   if (!layer._hydraSource) { content.appendChild(zone); return; }
 
+  // URL input
+  const urlRow = document.createElement('div');
+  urlRow.style.cssText = 'display:flex; gap:4px; margin: 4px 4px 0;';
+  const urlInput = document.createElement('input');
+  urlInput.type = 'url';
+  urlInput.placeholder = 'https://image-url…';
+  urlInput.value = layer.imgUrl || '';
+  urlInput.style.cssText = `
+    flex: 1; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 2px; color: #fff; font-size: 10px; font-family: inherit;
+    padding: 4px 6px; outline: none;
+  `;
+  const loadBtn = document.createElement('button');
+  loadBtn.textContent = 'Load';
+  loadBtn.style.cssText = `
+    background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 2px; color: #fff; font-size: 10px; font-family: inherit;
+    padding: 4px 8px; cursor: pointer;
+  `;
+  const applyUrl = () => {
+    const url = urlInput.value.trim();
+    if (!url) return;
+    if (url.startsWith('data:')) {
+      showWarning('Data URIs are not supported — use an external image URL.');
+      return;
+    }
+    if (url.length > 500) {
+      showWarning('Image URL is very long and may make sharing impractical.');
+    }
+    layer.imgUrl = url;
+    layer._hydraSource.initImage(url);
+    zone.textContent = `✓ ${url.split('/').pop() || url}`;
+    render(getLayers());
+    saveToUrl(getLayers());
+  };
+  loadBtn.addEventListener('click', applyUrl);
+  urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyUrl(); });
+  urlRow.append(urlInput, loadBtn);
+  content.appendChild(urlRow);
+
   const highlight = (on) => {
     zone.style.borderColor = on ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)';
     zone.style.color       = on ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)';
@@ -78,14 +121,18 @@ function addImageDropZone(folder, layer) {
 
 function onChange() {
   render(getLayers());
+  saveToUrl(getLayers());
 }
 
 function rebuild() {
   buildLayersUI();
   render(getLayers());
+  saveToUrl(getLayers());
 }
 
 function buildLayersUI() {
+  const scrollTop = uiContainer?.scrollTop ?? 0;
+
   while (layersPane.children.length > 0) {
     layersPane.remove(layersPane.children[0]);
   }
@@ -101,7 +148,8 @@ function buildLayersUI() {
     const isBase = arrayIdx === 0;
     const atFront = arrayIdx === layers.length - 1;
 
-    const f = layersPane.addFolder({ title: layer.name, expanded: true });
+    const f = layersPane.addFolder({ title: layer.name, expanded: layer._expanded });
+    f.on('fold', (ev) => { layer._expanded = ev.expanded; });
 
     // Visibility toggle
     f.addBinding(layer, 'visible', { label: 'Visible' }).on('change', onChange);
@@ -273,4 +321,6 @@ function buildLayersUI() {
       rebuild();
     });
   });
+
+  requestAnimationFrame(() => { if (uiContainer) uiContainer.scrollTop = scrollTop; });
 }
