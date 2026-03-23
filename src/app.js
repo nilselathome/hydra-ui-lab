@@ -11,8 +11,8 @@ new Hydra({ canvas, detectAudio: false, makeGlobal: true });
 // Hydra needs a tick before the GL context is ready to accept chains
 setTimeout(() => {
   const savedData = loadFromUrl();
-  if (savedData) applyState(deserializeLayers(savedData));
+  if (savedData) applyState(deserializeLayers(savedData.layers ?? savedData));
 
-  initUI(document.getElementById('ui'));
+  initUI(document.getElementById('ui'), savedData?.ui ?? {});
   render(getLayers());
 }, 500);

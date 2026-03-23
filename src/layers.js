@@ -103,6 +103,7 @@ export function applyState(dataArray) {
     layer.visible   = data.visible   ?? true;
     layer.opacity   = data.opacity   ?? 0.5;
     layer.blendMode = data.blendMode ?? 'blend';
+    layer._expanded = data._expanded ?? true;
     Object.assign(layer.params, data.params ?? {});
     layer.transforms = data.transforms ?? [];
     layer.mods       = data.mods       ?? [];

@@ -7,10 +7,20 @@ import { saveToUrl, showWarning } from './state.js';
 let addPane = null;
 let layersPane = null;
 let uiContainer = null;
+let addPaneExpanded = true;
+let layersPaneExpanded = true;
 
-export function initUI(container) {
+function save() {
+  saveToUrl(getLayers(), { addPane: addPaneExpanded, layersPane: layersPaneExpanded });
+}
+
+export function initUI(container, uiState = {}) {
   uiContainer = container;
-  addPane = new Pane({ container, title: 'Add Layer' });
+  addPaneExpanded    = uiState.addPane    ?? true;
+  layersPaneExpanded = uiState.layersPane ?? true;
+
+  addPane = new Pane({ container, title: 'Add Layer', expanded: addPaneExpanded });
+  addPane.on('fold', (ev) => { addPaneExpanded = ev.expanded; save(); });
   Object.entries(LAYER_TYPES).forEach(([type, def]) => {
     if (def.noLayer) return;
     const btn = addPane.addButton({ title: def.shortLabel ?? def.label }).on('click', () => {
@@ -28,7 +38,9 @@ export function initUI(container) {
     }
   });
 
-  layersPane = new Pane({ container, title: 'Layers' });
+  layersPane = new Pane({ container, title: 'Layers', expanded: layersPaneExpanded });
+  layersPane.element.style.marginTop = '1rem';
+  layersPane.on('fold', (ev) => { layersPaneExpanded = ev.expanded; save(); });
   buildLayersUI();
 }
 
@@ -85,7 +97,7 @@ function addImageDropZone(folder, layer) {
     layer._hydraSource.initImage(url);
     zone.textContent = `✓ ${url.split('/').pop() || url}`;
     render(getLayers());
-    saveToUrl(getLayers());
+    save();
   };
   loadBtn.addEventListener('click', applyUrl);
   urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyUrl(); });
@@ -121,13 +133,13 @@ function addImageDropZone(folder, layer) {
 
 function onChange() {
   render(getLayers());
-  saveToUrl(getLayers());
+  save();
 }
 
 function rebuild() {
   buildLayersUI();
   render(getLayers());
-  saveToUrl(getLayers());
+  save();
 }
 
 function buildLayersUI() {
@@ -149,7 +161,7 @@ function buildLayersUI() {
     const atFront = arrayIdx === layers.length - 1;
 
     const f = layersPane.addFolder({ title: layer.name, expanded: layer._expanded });
-    f.on('fold', (ev) => { layer._expanded = ev.expanded; });
+    f.on('fold', (ev) => { layer._expanded = ev.expanded; save(); });
 
     // Visibility toggle
     f.addBinding(layer, 'visible', { label: 'Visible' }).on('change', onChange);
@@ -183,7 +195,7 @@ function buildLayersUI() {
     layer.transforms.forEach((transform, tIdx) => {
       const tDef = TRANSFORM_TYPES[transform.type];
       const tFolder = f.addFolder({ title: tDef.label, expanded: transform._expanded });
-      tFolder.on('fold', (ev) => { transform._expanded = ev.expanded; });
+      tFolder.on('fold', (ev) => { transform._expanded = ev.expanded; save(); });
 
       tFolder.addBinding(transform, 'type', { label: 'Type', options: transformTypeOptions })
         .on('change', (ev) => {
@@ -204,7 +216,7 @@ function buildLayersUI() {
         }
         const animTitle = tDef.params.length > 1 ? `Animate ${p.label}` : 'Animate';
         const tAnimFolder = tFolder.addFolder({ title: animTitle, expanded: anim._expanded });
-        tAnimFolder.on('fold', (ev) => { anim._expanded = ev.expanded; });
+        tAnimFolder.on('fold', (ev) => { anim._expanded = ev.expanded; save(); });
         tAnimFolder.addBinding(anim, 'enabled', { label: 'Enable' })
           .on('change', () => { transform._expanded = true; anim._expanded = true; rebuild(); });
         if (anim.enabled) {
@@ -242,7 +254,7 @@ function buildLayersUI() {
 
     layer.mods.forEach((mod, modIdx) => {
       const modFolder = f.addFolder({ title: `Mod ${modIdx + 1}`, expanded: mod._expanded });
-      modFolder.on('fold', (ev) => { mod._expanded = ev.expanded; });
+      modFolder.on('fold', (ev) => { mod._expanded = ev.expanded; save(); });
 
       modFolder.addBinding(mod, 'enabled', { label: 'Enable' }).on('change', onChange);
 
@@ -270,7 +282,7 @@ function buildLayersUI() {
       }
 
       const animFolder = modFolder.addFolder({ title: 'Animate', expanded: mod.animate._expanded });
-      animFolder.on('fold', (ev) => { mod.animate._expanded = ev.expanded; });
+      animFolder.on('fold', (ev) => { mod.animate._expanded = ev.expanded; save(); });
       animFolder.addBinding(mod.animate, 'enabled', { label: 'Enable' })
         .on('change', () => { mod._expanded = true; mod.animate._expanded = true; rebuild(); });
       if (mod.animate.enabled) {
