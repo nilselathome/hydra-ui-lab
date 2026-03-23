@@ -2,7 +2,7 @@ import { LAYER_TYPES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
 
 // o0 is reserved for the final composite (it's what the canvas displays by default).
 // Layers render into o1-o3 so the composite never reads its own output (no feedback loop).
-const MAX_LAYERS = 3;
+export const MAX_LAYERS = 3;
 
 const getLayerOutputs = () => [o1, o2, o3];
 

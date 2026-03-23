@@ -1,11 +1,12 @@
 import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
 import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
 import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate } from './layers.js';
-import { render } from './engine.js';
+import { render, MAX_LAYERS } from './engine.js';
 import { saveToUrl, showWarning } from './state.js';
 
 let addPane = null;
 let layersPane = null;
+let addButtons = [];
 let uiContainer = null;
 let addPaneExpanded = true;
 let layersPaneExpanded = true;
@@ -21,12 +22,14 @@ export function initUI(container, uiState = {}) {
 
   addPane = new Pane({ container, title: 'Add Layer', expanded: addPaneExpanded });
   addPane.on('fold', (ev) => { addPaneExpanded = ev.expanded; save(); });
+  addButtons = [];
   Object.entries(LAYER_TYPES).forEach(([type, def]) => {
     if (def.noLayer) return;
     const btn = addPane.addButton({ title: def.shortLabel ?? def.label }).on('click', () => {
       addLayer(type);
       rebuild();
     });
+    addButtons.push(btn);
     if (def.icon) {
       const textEl = btn.element.querySelector('button')?.firstElementChild;
       if (textEl) {
@@ -131,6 +134,11 @@ function addImageDropZone(folder, layer) {
   content.appendChild(zone);
 }
 
+function updateAddButtons() {
+  const atLimit = getLayers().length >= MAX_LAYERS;
+  addButtons.forEach(btn => { btn.disabled = atLimit; });
+}
+
 function onChange() {
   render(getLayers());
   save();
@@ -138,6 +146,7 @@ function onChange() {
 
 function rebuild() {
   buildLayersUI();
+  updateAddButtons();
   render(getLayers());
   save();
 }
