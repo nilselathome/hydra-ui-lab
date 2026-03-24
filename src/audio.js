@@ -8,14 +8,20 @@ let analyser     = null;
 let activeStream = null; // MediaStream (mic or tab)
 let activeEl     = null; // HTMLAudioElement (file)
 let rafId        = null;
+let currentFile  = null; // File reference — persisted across stop()
+let loopA        = null; // A-B loop start time (seconds)
+let loopB        = null; // A-B loop end time (seconds)
 
 // Ensure window.a.fft exists — Hydra may not create it with detectAudio:false
 if (!window.a)       window.a      = {};
 if (!window.a.fft)   window.a.fft  = Array(BAND_COUNT).fill(0);
 
-export let status = 'none'; // 'none' | 'mic' | 'tab' | 'file'
-let onStatusChange = null;
-export function setStatusCallback(fn) { onStatusChange = fn; }
+export let status = 'none'; // 'none' | 'mic' | 'tab' | 'file' | 'file-paused'
+let onStatusChange   = null;
+let onPlaybackUpdate = null;
+
+export function setStatusCallback(fn)   { onStatusChange   = fn; }
+export function setPlaybackCallback(fn) { onPlaybackUpdate = fn; }
 
 const STATUS_LABELS = {
   none: 'No source',
@@ -29,12 +35,27 @@ function getCtx() {
   return audioCtx;
 }
 
-function teardown() {
-  if (rafId)        { cancelAnimationFrame(rafId); rafId = null; }
-  if (analyser)     { analyser.disconnect(); analyser = null; }
-  if (activeStream) { activeStream.getTracks().forEach(t => t.stop()); activeStream = null; }
-  if (activeEl)     { activeEl.pause(); activeEl.remove(); activeEl = null; }
+function teardownAnalyser() {
+  if (rafId)    { cancelAnimationFrame(rafId); rafId = null; }
+  if (analyser) { analyser.disconnect(); analyser = null; }
   window.a.fft.fill(0);
+}
+
+function teardownStream() {
+  if (activeStream) { activeStream.getTracks().forEach(t => t.stop()); activeStream = null; }
+}
+
+function teardownFile() {
+  if (activeEl) { activeEl.pause(); activeEl.src = ''; activeEl.remove(); activeEl = null; }
+  currentFile = null;
+  loopA = null;
+  loopB = null;
+}
+
+function teardown() {
+  teardownAnalyser();
+  teardownStream();
+  teardownFile();
 }
 
 function attachAnalyser(sourceNode, smoothing = 0.8) {
@@ -64,6 +85,18 @@ function notify(newStatus, label) {
   onStatusChange?.(status, label ?? STATUS_LABELS[status] ?? status);
 }
 
+function notifyPlayback() {
+  onPlaybackUpdate?.({
+    hasFile:     !!currentFile,
+    fileName:    currentFile?.name ?? null,
+    currentTime: activeEl?.currentTime ?? 0,
+    duration:    isFinite(activeEl?.duration) ? activeEl.duration : 0,
+    paused:      activeEl?.paused ?? true,
+    loopA,
+    loopB,
+  });
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function connectMic() {
@@ -72,6 +105,7 @@ export async function connectMic() {
   activeStream = stream;
   attachAnalyser(getCtx().createMediaStreamSource(stream));
   notify('mic');
+  notifyPlayback();
 }
 
 export async function connectTab() {
@@ -88,29 +122,105 @@ export async function connectTab() {
   stream.getAudioTracks()[0].addEventListener('ended', () => {
     teardown();
     notify('none');
+    notifyPlayback();
   });
   attachAnalyser(getCtx().createMediaStreamSource(stream));
   notify('tab');
+  notifyPlayback();
 }
 
 export function connectFile(file) {
-  teardown();
+  teardownAnalyser();
+  teardownStream();
+  teardownFile();
+
   const ctx = getCtx();
   const el  = new Audio();
   el.src    = URL.createObjectURL(file);
   el.loop   = true;
   document.body.appendChild(el);
-  activeEl  = el;
+  activeEl    = el;
+  currentFile = file;
+
   const src = ctx.createMediaElementSource(el);
   src.connect(ctx.destination); // so the user can hear it
   attachAnalyser(src);
+
+  // A-B loop enforcement + UI updates
+  el.addEventListener('timeupdate', () => {
+    if (loopA !== null && loopB !== null) {
+      const a = Math.min(loopA, loopB);
+      const b = Math.max(loopA, loopB);
+      if (el.currentTime > b) el.currentTime = a;
+    }
+    notifyPlayback();
+  });
+
   el.play();
-  notify('file', `♪ ${file.name}`);
+  notify('file', file.name);
+  notifyPlayback();
 }
 
+// Pause file playback but keep everything loaded
 export function stop() {
+  if (currentFile && activeEl) {
+    activeEl.pause();
+    notify('file-paused', currentFile.name);
+    notifyPlayback();
+  } else {
+    teardown();
+    notify('none');
+    notifyPlayback();
+  }
+}
+
+// Fully remove the file
+export function ejectFile() {
   teardown();
   notify('none');
+  notifyPlayback();
+}
+
+export function playFile() {
+  if (!activeEl) return;
+  if (audioCtx?.state === 'suspended') audioCtx.resume();
+  activeEl.play();
+  notify('file', currentFile?.name ?? '');
+  notifyPlayback();
+}
+
+export function pauseFile() {
+  if (!activeEl) return;
+  activeEl.pause();
+  notify('file-paused', currentFile?.name ?? '');
+  notifyPlayback();
+}
+
+export function seekFile(t) {
+  if (!activeEl) return;
+  activeEl.currentTime = Math.max(0, Math.min(t, isFinite(activeEl.duration) ? activeEl.duration : 0));
+  notifyPlayback();
+}
+
+export function setLoopA() {
+  if (!activeEl) return;
+  loopA = activeEl.currentTime;
+  if (loopA !== null && loopB !== null) activeEl.loop = false;
+  notifyPlayback();
+}
+
+export function setLoopB() {
+  if (!activeEl) return;
+  loopB = activeEl.currentTime;
+  if (loopA !== null && loopB !== null) activeEl.loop = false;
+  notifyPlayback();
+}
+
+export function clearLoop() {
+  loopA = null;
+  loopB = null;
+  if (activeEl) activeEl.loop = true;
+  notifyPlayback();
 }
 
 export function setSmoothing(v) {

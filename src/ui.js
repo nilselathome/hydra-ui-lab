@@ -5,6 +5,13 @@ import { render, MAX_LAYERS } from './engine.js';
 import { saveToUrl, showWarning } from './state.js';
 import * as Audio from './audio.js';
 
+function formatTime(s) {
+  if (!isFinite(s) || s < 0) return '0:00';
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60).toString().padStart(2, '0');
+  return `${m}:${sec}`;
+}
+
 let addPane = null;
 let layersPane = null;
 let addButtons = [];
@@ -71,7 +78,7 @@ function initAudioPane(container, uiState = {}) {
   pane.addBinding(smoothingObj, 'smoothing', { label: 'Smoothing', min: 0, max: 1, step: 0.01 })
     .on('change', () => Audio.setSmoothing(smoothingObj.smoothing));
 
-  // Audio file drop zone — appended after Tweakpane controls so it sits at the bottom
+  // ── File drop zone ────────────────────────────────────────────────────────
   const zone = document.createElement('div');
   zone.style.cssText = `
     border: 1px dashed rgba(255,255,255,0.2); border-radius: 2px;
@@ -82,7 +89,7 @@ function initAudioPane(container, uiState = {}) {
   `;
   zone.textContent = '↓ Drop audio file or click to browse';
 
-  const highlight = (on) => {
+  const highlightZone = (on) => {
     zone.style.borderColor = on ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)';
     zone.style.color       = on ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)';
   };
@@ -91,9 +98,9 @@ function initAudioPane(container, uiState = {}) {
     Audio.connectFile(file);
   };
 
-  zone.addEventListener('dragover',  (e) => { e.preventDefault(); highlight(true); });
-  zone.addEventListener('dragleave', ()  => highlight(false));
-  zone.addEventListener('drop',      (e) => { e.preventDefault(); highlight(false); loadFile(e.dataTransfer.files[0]); });
+  zone.addEventListener('dragover',  (e) => { e.preventDefault(); highlightZone(true); });
+  zone.addEventListener('dragleave', ()  => highlightZone(false));
+  zone.addEventListener('drop',      (e) => { e.preventDefault(); highlightZone(false); loadFile(e.dataTransfer.files[0]); });
   zone.addEventListener('click', () => {
     const input = document.createElement('input');
     input.type = 'file'; input.accept = 'audio/*';
@@ -102,7 +109,124 @@ function initAudioPane(container, uiState = {}) {
   });
   pane.element.appendChild(zone);
 
-  Audio.setStatusCallback((_, label) => { zone.textContent = label; });
+  // ── Playback controls (shown when file is loaded) ─────────────────────────
+  const css = (el, styles) => Object.assign(el.style, styles);
+  const btn = (label, title) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    if (title) b.title = title;
+    css(b, {
+      background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.18)',
+      borderRadius: '2px', color: 'rgba(255,255,255,0.8)', fontSize: '10px',
+      fontFamily: 'inherit', padding: '3px 7px', cursor: 'pointer', flexShrink: '0',
+    });
+    b.addEventListener('mouseenter', () => { b.style.background = 'rgba(255,255,255,0.16)'; });
+    b.addEventListener('mouseleave', () => { b.style.background = 'rgba(255,255,255,0.08)'; });
+    return b;
+  };
+
+  const controls = document.createElement('div');
+  css(controls, { display: 'none', flexDirection: 'column', gap: '5px', margin: '4px 4px 2px', userSelect: 'none' });
+
+  // File name row
+  const nameRow = document.createElement('div');
+  css(nameRow, { display: 'flex', alignItems: 'center', gap: '4px' });
+  const nameLabel = document.createElement('span');
+  css(nameLabel, { flex: '1', fontSize: '10px', fontFamily: 'inherit', color: 'rgba(255,255,255,0.6)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
+  const ejectBtn = btn('✕', 'Eject file');
+  css(ejectBtn, { padding: '2px 5px', background: 'none', border: 'none', color: 'rgba(255,255,255,0.35)' });
+  ejectBtn.addEventListener('mouseenter', () => { ejectBtn.style.color = 'rgba(255,255,255,0.8)'; });
+  ejectBtn.addEventListener('mouseleave', () => { ejectBtn.style.color = 'rgba(255,255,255,0.35)'; });
+  ejectBtn.addEventListener('click', () => Audio.ejectFile());
+  nameRow.append(nameLabel, ejectBtn);
+
+  // Seek bar row
+  const seekRow = document.createElement('div');
+  css(seekRow, { display: 'flex', alignItems: 'center', gap: '6px' });
+  const seekBar = document.createElement('input');
+  seekBar.type = 'range'; seekBar.min = '0'; seekBar.max = '100'; seekBar.value = '0'; seekBar.step = '0.05';
+  css(seekBar, { flex: '1', accentColor: 'rgba(255,255,255,0.6)', cursor: 'pointer', height: '3px' });
+  const timeLabel = document.createElement('span');
+  css(timeLabel, { fontSize: '10px', fontFamily: 'monospace', color: 'rgba(255,255,255,0.4)', flexShrink: '0', minWidth: '65px', textAlign: 'right' });
+  timeLabel.textContent = '0:00 / 0:00';
+  seekRow.append(seekBar, timeLabel);
+
+  // Transport row
+  const transportRow = document.createElement('div');
+  css(transportRow, { display: 'flex', alignItems: 'center', gap: '4px' });
+  const playPauseBtn = btn('▶', 'Play / Pause');
+  transportRow.appendChild(playPauseBtn);
+
+  // A-B loop row
+  const abRow = document.createElement('div');
+  css(abRow, { display: 'flex', alignItems: 'center', gap: '4px', marginTop: '1px' });
+  const setBtnA  = btn('A', 'Set loop start');
+  const setBtnB  = btn('B', 'Set loop end');
+  const clearBtn = btn('✕ loop', 'Clear A-B loop');
+  const abLabel  = document.createElement('span');
+  css(abLabel, { fontSize: '10px', fontFamily: 'monospace', color: 'rgba(255,255,255,0.4)', marginLeft: '2px' });
+  abRow.append(setBtnA, setBtnB, clearBtn, abLabel);
+
+  controls.append(nameRow, seekRow, transportRow, abRow);
+  pane.element.appendChild(controls);
+
+  // ── Wiring ─────────────────────────────────────────────────────────────────
+  let isSeeking = false;
+  seekBar.addEventListener('pointerdown', () => { isSeeking = true; });
+  seekBar.addEventListener('pointerup',   () => { isSeeking = false; Audio.seekFile(parseFloat(seekBar.value)); });
+  seekBar.addEventListener('input',       () => { if (isSeeking) Audio.seekFile(parseFloat(seekBar.value)); });
+
+  playPauseBtn.addEventListener('click', () => {
+    if (Audio.status === 'file') Audio.pauseFile();
+    else Audio.playFile();
+  });
+
+  setBtnA.addEventListener('click',  () => Audio.setLoopA());
+  setBtnB.addEventListener('click',  () => Audio.setLoopB());
+  clearBtn.addEventListener('click', () => Audio.clearLoop());
+
+  // ── Callbacks ──────────────────────────────────────────────────────────────
+  Audio.setStatusCallback((st, label) => {
+    if (st === 'file' || st === 'file-paused') {
+      zone.style.display = 'none';
+      controls.style.display = 'flex';
+    } else {
+      zone.style.display = '';
+      controls.style.display = 'none';
+      if (st === 'none') zone.textContent = '↓ Drop audio file or click to browse';
+      else zone.textContent = label;
+    }
+  });
+
+  Audio.setPlaybackCallback(({ hasFile, fileName, currentTime, duration, paused, loopA, loopB }) => {
+    if (!hasFile) return;
+
+    nameLabel.textContent = `♪ ${fileName}`;
+    playPauseBtn.textContent = paused ? '▶' : '⏸';
+
+    if (!isSeeking && duration > 0) {
+      seekBar.max   = String(duration);
+      seekBar.value = String(currentTime);
+    }
+    timeLabel.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
+
+    // A-B label
+    const hasA = loopA !== null;
+    const hasB = loopB !== null;
+    const abActive = hasA && hasB;
+    css(setBtnA, { borderColor: hasA ? 'rgba(100,200,255,0.7)' : 'rgba(255,255,255,0.18)', color: hasA ? 'rgba(100,200,255,0.9)' : 'rgba(255,255,255,0.8)' });
+    css(setBtnB, { borderColor: hasB ? 'rgba(100,200,255,0.7)' : 'rgba(255,255,255,0.18)', color: hasB ? 'rgba(100,200,255,0.9)' : 'rgba(255,255,255,0.8)' });
+    clearBtn.style.display = abActive ? '' : 'none';
+    if (abActive) {
+      const a = Math.min(loopA, loopB);
+      const b = Math.max(loopA, loopB);
+      abLabel.textContent = `${formatTime(a)} → ${formatTime(b)}`;
+    } else if (hasA) {
+      abLabel.textContent = `A: ${formatTime(loopA)}`;
+    } else {
+      abLabel.textContent = '';
+    }
+  });
 }
 
 function addImageDropZone(folder, layer) {
