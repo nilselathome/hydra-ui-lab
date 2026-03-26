@@ -1,11 +1,5 @@
 import { LAYER_TYPES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
 
-// o0 is reserved for the final composite (it's what the canvas displays by default).
-// Layers render into o1-o3 so the composite never reads its own output (no feedback loop).
-export const MAX_LAYERS = 3;
-
-const getLayerOutputs = () => [o1, o2, o3];
-
 function animatedValue(animate, min, max) {
   const range = max - min;
   if (animate.mode === 'audio')
@@ -44,21 +38,16 @@ function buildLayer(layer) {
 }
 
 export function render(layers) {
-  const visible = layers.filter(l => l.visible).slice(0, MAX_LAYERS);
+  const visible = layers.filter(l => l.visible);
   if (visible.length === 0) return;
 
-  const outs = getLayerOutputs();
-
-  // Render each layer into its own buffer (o1-o3)
-  visible.forEach((layer, i) => {
-    buildLayer(layer).out(outs[i]);
-  });
-
-  // Composite bottom → top, write to o0 (canvas)
-  let composite = src(outs[0]);
+  // Composite all layers inline — no intermediate output buffers needed.
+  // Each buildLayer() returns a Hydra chain node; compositing them directly
+  // compiles to a single GLSL shader pass, removing the o1-o3 buffer limit.
+  let composite = buildLayer(visible[0]);
   for (let i = 1; i < visible.length; i++) {
     const layer = visible[i];
-    composite = composite[layer.blendMode](src(outs[i]), layer.opacity);
+    composite = composite[layer.blendMode](buildLayer(visible[i]), layer.opacity);
   }
   composite.out(o0);
 }

@@ -17,6 +17,19 @@ export function getLayers() {
   return layers;
 }
 
+export function drawTextCanvas(layer) {
+  const canvas = layer._canvas;
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const p = layer.params;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.font = `${Math.round(p.size)}px "${layer.fontFamily}"`;
+  ctx.fillStyle = `rgb(${Math.round(p.r * 255)},${Math.round(p.g * 255)},${Math.round(p.b * 255)})`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(layer.textContent ?? '', canvas.width * p.x, canvas.height * p.y);
+}
+
 function defaultModParams(srcType) {
   const p = {};
   LAYER_TYPES[srcType].params.forEach(def => { p[def.key] = def.default; });
@@ -82,6 +95,20 @@ export function addLayer(type, overrides = {}) {
     layer.imgUrl = '';
   }
 
+  if (type === 'text') {
+    const slot = allocateSlot();
+    layer._hydraSlot = slot;
+    layer._hydraSource = slot !== null ? window[`s${slot}`] : null;
+    layer.textContent = 'Text';
+    layer.fontFamily = 'Arial';
+    const canvas = document.createElement('canvas');
+    canvas.width = 1920;
+    canvas.height = 1080;
+    layer._canvas = canvas;
+    drawTextCanvas(layer);
+    layer._hydraSource?.init({ src: canvas });
+  }
+
   layers.push(layer);
   return layer;
 }
@@ -110,6 +137,11 @@ export function applyState(dataArray) {
     if (data.type === 'img' && data.imgUrl) {
       layer.imgUrl = data.imgUrl;
       layer._hydraSource?.initImage(data.imgUrl);
+    }
+    if (data.type === 'text') {
+      layer.textContent = data.textContent ?? 'Text';
+      layer.fontFamily  = data.fontFamily  ?? 'Arial';
+      drawTextCanvas(layer);
     }
   });
 }

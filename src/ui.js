@@ -1,8 +1,8 @@
 import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
 import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
-import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate } from './layers.js';
-import { render, MAX_LAYERS } from './engine.js';
-import { saveToUrl, showWarning } from './state.js';
+import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, applyState } from './layers.js';
+import { render } from './engine.js';
+import { saveToUrl, showWarning, encodeState, deserializeLayers } from './state.js';
 import * as Audio from './audio.js';
 
 function formatTime(s) {
@@ -14,14 +14,197 @@ function formatTime(s) {
 
 let addPane = null;
 let layersPane = null;
-let addButtons = [];
 let uiContainer = null;
-let addPaneExpanded   = true;
-let audioPaneExpanded = true;
+let addPaneExpanded    = true;
+let audioPaneExpanded  = true;
 let layersPaneExpanded = true;
+let scenesPaneExpanded = true;
 
 function save() {
-  saveToUrl(getLayers(), { addPane: addPaneExpanded, audioPane: audioPaneExpanded, layersPane: layersPaneExpanded });
+  saveToUrl(getLayers(), { addPane: addPaneExpanded, audioPane: audioPaneExpanded, layersPane: layersPaneExpanded, scenesPane: scenesPaneExpanded });
+}
+
+// ── Scene slots ────────────────────────────────────────────────────────────────
+const SCENE_COUNT = 16;
+const SCENE_KEY   = (n) => `hydra-scene-${n}`;
+let activeSlot    = null;   // slot number last saved/loaded, or null
+let _sceneButtons = [];     // DOM button elements, index 0 = slot 1
+
+function getLayersEncoded() {
+  // Store layer data only (no UI pane state) so comparisons aren't thrown off by fold changes
+  return encodeState(getLayers(), {});
+}
+
+function decodeStoredScene(raw) {
+  try {
+    const payload = JSON.parse(decodeURIComponent(atob(raw)));
+    return Array.isArray(payload) ? { layers: payload } : payload;
+  } catch {
+    return null;
+  }
+}
+
+function applySlotStyle(btn, filled, active) {
+  const base = 'width:100%;border-radius:2px;cursor:pointer;font-size:9px;font-family:inherit;font-weight:bold;padding:5px 0;border:1px solid;transition:background 0.15s,border-color 0.15s,color 0.15s;';
+  if (active) {
+    btn.style.cssText = base + 'background:rgba(100,200,120,0.3);border-color:rgba(100,200,120,0.7);color:rgba(140,230,160,0.95)';
+  } else if (filled) {
+    btn.style.cssText = base + 'background:rgba(100,160,255,0.15);border-color:rgba(100,160,255,0.4);color:rgba(140,190,255,0.9)';
+  } else {
+    btn.style.cssText = base + 'background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.1);color:rgba(255,255,255,0.25)';
+  }
+}
+
+function refreshSceneButtons() {
+  _sceneButtons.forEach((btn, i) => {
+    const slot   = i + 1;
+    const filled = localStorage.getItem(SCENE_KEY(slot)) !== null;
+    applySlotStyle(btn, filled, activeSlot === slot);
+  });
+}
+
+// ── Scene context menu (singleton) ────────────────────────────────────────────
+function createSceneContextMenu() {
+  const menu = document.createElement('div');
+  menu.style.cssText = `
+    position: fixed; z-index: 99999; display: none;
+    background: rgba(30,30,30,0.97); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 3px; padding: 3px 0; min-width: 160px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5); font-family: inherit;
+  `;
+
+  const makeItem = (label) => {
+    const item = document.createElement('button');
+    item.textContent = label;
+    item.style.cssText = `
+      display: block; width: 100%; text-align: left;
+      background: none; border: none; color: rgba(255,255,255,0.8);
+      font-size: 10px; font-family: inherit; padding: 5px 12px;
+      cursor: pointer;
+    `;
+    item.addEventListener('mouseenter', () => { item.style.background = 'rgba(255,255,255,0.1)'; });
+    item.addEventListener('mouseleave', () => { item.style.background = 'none'; });
+    return item;
+  };
+
+  const overwriteItem = makeItem('Overwrite with current');
+  const clearItem     = makeItem('Clear slot');
+  menu.append(overwriteItem, clearItem);
+  document.body.appendChild(menu);
+
+  let currentSlot = null;
+
+  const hide = () => { menu.style.display = 'none'; currentSlot = null; };
+
+  const show = (slot, x, y) => {
+    currentSlot = slot;
+    menu.style.display = 'block';
+    // Clamp to viewport
+    const mw = menu.offsetWidth  || 160;
+    const mh = menu.offsetHeight || 64;
+    menu.style.left = `${Math.min(x, window.innerWidth  - mw - 8)}px`;
+    menu.style.top  = `${Math.min(y, window.innerHeight - mh - 8)}px`;
+  };
+
+  overwriteItem.addEventListener('click', () => {
+    if (currentSlot === null) return;
+    localStorage.setItem(SCENE_KEY(currentSlot), getLayersEncoded());
+    activeSlot = currentSlot;
+    refreshSceneButtons();
+    hide();
+  });
+
+  clearItem.addEventListener('click', () => {
+    if (currentSlot === null) return;
+    localStorage.removeItem(SCENE_KEY(currentSlot));
+    if (activeSlot === currentSlot) activeSlot = null;
+    refreshSceneButtons();
+    hide();
+  });
+
+  document.addEventListener('pointerdown', (e) => {
+    if (!menu.contains(e.target)) hide();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') hide();
+  });
+
+  return { show, hide };
+}
+
+function initScenesPane(container, uiState = {}) {
+  scenesPaneExpanded = uiState.scenesPane ?? true;
+  const pane = new Pane({ container, title: 'Scenes', expanded: scenesPaneExpanded });
+  pane.on('fold', (ev) => { scenesPaneExpanded = ev.expanded; save(); });
+
+  const contextMenu = createSceneContextMenu();
+
+  const grid = document.createElement('div');
+  grid.style.cssText = 'display:grid;grid-template-columns:repeat(8,1fr);gap:3px;padding:6px 4px 4px';
+
+  _sceneButtons = [];
+
+  for (let slot = 1; slot <= SCENE_COUNT; slot++) {
+    const btn    = document.createElement('button');
+    btn.textContent = String(slot);
+    const filled = localStorage.getItem(SCENE_KEY(slot)) !== null;
+    applySlotStyle(btn, filled, false);
+
+    btn.addEventListener('click', () => {
+      const stored  = localStorage.getItem(SCENE_KEY(slot));
+      const current = getLayersEncoded();
+
+      // Confirm if switching away from the current slot with unsaved changes
+      if (activeSlot !== slot && getLayers().length > 0 && current !== stored) {
+        if (!confirm(`Load scene ${slot}? Current changes will be lost.`)) return;
+      }
+
+      if (!stored) {
+        // Empty slot → clear the canvas
+        applyState([]);
+        activeSlot = slot;
+        rebuild();
+        refreshSceneButtons();
+        return;
+      }
+
+      // Filled slot → load
+      const data = decodeStoredScene(stored);
+      if (!data) { showWarning(`Scene ${slot} could not be loaded.`); return; }
+      applyState(deserializeLayers(data.layers ?? data));
+      activeSlot = slot;
+      rebuild();
+      refreshSceneButtons();
+    });
+
+    btn.addEventListener('contextmenu', (e) => {
+      if (!localStorage.getItem(SCENE_KEY(slot))) return; // nothing to do on empty slots
+      e.preventDefault();
+      contextMenu.show(slot, e.clientX, e.clientY);
+    });
+
+    _sceneButtons.push(btn);
+    grid.appendChild(btn);
+  }
+
+  // Inject grid into the pane's collapsible content area
+  const content = pane.element.querySelector('.tp-rotv_c') ?? pane.element;
+  content.appendChild(grid);
+
+  const clearBtn = document.createElement('button');
+  clearBtn.textContent = 'Clear localStorage';
+  clearBtn.style.cssText = `
+    display: block; width: calc(100% - 8px); margin: 4px 4px 6px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 2px; color: rgba(255,255,255,0.3); font-size: 9px;
+    font-family: inherit; padding: 4px; cursor: pointer;
+  `;
+  clearBtn.addEventListener('click', () => {
+    for (let i = 1; i <= SCENE_COUNT; i++) localStorage.removeItem(SCENE_KEY(i));
+    activeSlot = null;
+    refreshSceneButtons();
+  });
+  content.appendChild(clearBtn);
 }
 
 export function initUI(container, uiState = {}) {
@@ -29,16 +212,17 @@ export function initUI(container, uiState = {}) {
   addPaneExpanded    = uiState.addPane    ?? true;
   layersPaneExpanded = uiState.layersPane ?? true;
 
+  initScenesPane(container, uiState);
+
   addPane = new Pane({ container, title: 'Add Layer', expanded: addPaneExpanded });
+  addPane.element.style.marginTop = '1rem';
   addPane.on('fold', (ev) => { addPaneExpanded = ev.expanded; save(); });
-  addButtons = [];
   Object.entries(LAYER_TYPES).forEach(([type, def]) => {
     if (def.noLayer) return;
     const btn = addPane.addButton({ title: def.shortLabel ?? def.label }).on('click', () => {
       addLayer(type);
       rebuild();
     });
-    addButtons.push(btn);
     if (def.icon) {
       const textEl = btn.element.querySelector('button')?.firstElementChild;
       if (textEl) {
@@ -316,19 +500,73 @@ function addImageDropZone(folder, layer) {
   content.appendChild(zone);
 }
 
-function updateAddButtons() {
-  const atLimit = getLayers().length >= MAX_LAYERS;
-  addButtons.forEach(btn => { btn.disabled = atLimit; });
+const TEXT_FONTS = [
+  'Arial', 'Arial Black', 'Comic Sans MS', 'Courier New', 'Georgia',
+  'Impact', 'Lucida Console', 'Palatino Linotype', 'Tahoma',
+  'Times New Roman', 'Trebuchet MS', 'Verdana',
+  'monospace', 'serif', 'sans-serif',
+];
+
+function addTextControls(folder, layer) {
+  const content = folder.element.querySelector('.tp-fldv_c') ?? folder.element;
+
+  const sharedInputStyle = `
+    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 2px; color: #fff; font-size: 10px; font-family: inherit;
+    padding: 4px 6px; outline: none;
+  `;
+
+  // Text content input
+  const textRow = document.createElement('div');
+  textRow.style.cssText = 'display:flex; gap:4px; margin: 4px 4px 0;';
+  const textInput = document.createElement('input');
+  textInput.type = 'text';
+  textInput.placeholder = 'Enter text…';
+  textInput.value = layer.textContent ?? '';
+  textInput.style.cssText = `flex: 1; ${sharedInputStyle}`;
+  textInput.addEventListener('input', () => {
+    layer.textContent = textInput.value;
+    drawTextCanvas(layer);
+    render(getLayers());
+    save();
+  });
+  textRow.appendChild(textInput);
+  content.appendChild(textRow);
+
+  // Font family selector
+  const fontRow = document.createElement('div');
+  fontRow.style.cssText = 'display:flex; align-items:center; gap:4px; margin: 4px 4px 2px;';
+  const fontLabel = document.createElement('span');
+  fontLabel.textContent = 'Font';
+  fontLabel.style.cssText = 'font-size:10px; font-family:inherit; color:rgba(255,255,255,0.5); flex-shrink:0;';
+  const fontSelect = document.createElement('select');
+  fontSelect.style.cssText = `flex:1; cursor:pointer; ${sharedInputStyle}`;
+  TEXT_FONTS.forEach(font => {
+    const opt = document.createElement('option');
+    opt.value = font;
+    opt.textContent = font;
+    if (font === layer.fontFamily) opt.selected = true;
+    fontSelect.appendChild(opt);
+  });
+  fontSelect.addEventListener('change', () => {
+    layer.fontFamily = fontSelect.value;
+    drawTextCanvas(layer);
+    render(getLayers());
+    save();
+  });
+  fontRow.append(fontLabel, fontSelect);
+  content.appendChild(fontRow);
 }
 
 function onChange() {
+  // Redraw any text canvases whose params may have changed
+  getLayers().filter(l => l.type === 'text').forEach(drawTextCanvas);
   render(getLayers());
   save();
 }
 
 function rebuild() {
   buildLayersUI();
-  updateAddButtons();
   render(getLayers());
   save();
 }
@@ -368,8 +606,9 @@ function buildLayersUI() {
         .on('change', onChange);
     }
 
-    // Image drop zone
-    if (layer.type === 'img') addImageDropZone(f, layer);
+    // Type-specific media controls
+    if (layer.type === 'img')  addImageDropZone(f, layer);
+    if (layer.type === 'text') addTextControls(f, layer);
 
     // Type-specific params
     LAYER_TYPES[layer.type].params.forEach(p => {

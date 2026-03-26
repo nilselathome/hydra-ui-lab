@@ -35,7 +35,9 @@ function serializeLayer(layer) {
     mods: layer.mods.map(serializeMod),
     _expanded: layer._expanded,
   };
-  if (layer.type === 'img') out.imgUrl = layer.imgUrl || '';
+  if (layer.type === 'img')  out.imgUrl      = layer.imgUrl      || '';
+  if (layer.type === 'text') out.textContent = layer.textContent ?? '';
+  if (layer.type === 'text') out.fontFamily  = layer.fontFamily  ?? 'Arial';
   return out;
 }
 

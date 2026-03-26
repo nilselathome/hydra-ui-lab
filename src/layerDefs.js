@@ -69,6 +69,22 @@ export const LAYER_TYPES = {
     build: (p, layer) => layer._hydraSource ? src(layer._hydraSource) : solid(0, 0, 0),
   },
 
+  text: {
+    label: 'Text',
+    shortLabel: 'Text',
+    icon: 'ph-text-t',
+    params: [
+      { key: 'size', label: 'Size', min: 8,  max: 400, default: 80,  step: 1 },
+      { key: 'x',    label: 'X',    min: 0,  max: 1,   default: 0.5 },
+      { key: 'y',    label: 'Y',    min: 0,  max: 1,   default: 0.5 },
+      { key: 'r',    label: 'R',    min: 0,  max: 1,   default: 1 },
+      { key: 'g',    label: 'G',    min: 0,  max: 1,   default: 1 },
+      { key: 'b',    label: 'B',    min: 0,  max: 1,   default: 1 },
+    ],
+    // layer._hydraSource is an s0–s3 slot; layer._canvas is the offscreen canvas it samples
+    build: (p, layer) => layer._hydraSource ? src(layer._hydraSource) : solid(0, 0, 0),
+  },
+
   // Special source: reads the previous frame's composite from o0 — creates feedback/trails
   feedback: {
     label: 'Feedback',
