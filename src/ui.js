@@ -22,13 +22,14 @@ let scenesPaneExpanded = true;
 
 function save() {
   saveToUrl(getLayers(), { addPane: addPaneExpanded, audioPane: audioPaneExpanded, layersPane: layersPaneExpanded, scenesPane: scenesPaneExpanded });
+  if (activeSlot !== null) localStorage.setItem(SCENE_KEY(activeSlot), getLayersEncoded());
 }
 
 // ── Scene slots ────────────────────────────────────────────────────────────────
 const SCENE_COUNT = 16;
 const SCENE_KEY   = (n) => `hydra-scene-${n}`;
-let activeSlot    = null;   // slot number last saved/loaded, or null
-let _sceneButtons = [];     // DOM button elements, index 0 = slot 1
+let activeSlot    = null;   // slot index (0-based), or null
+let _sceneButtons = [];     // DOM button elements, index === slot
 
 function getLayersEncoded() {
   // Store layer data only (no UI pane state) so comparisons aren't thrown off by fold changes
@@ -56,8 +57,7 @@ function applySlotStyle(btn, filled, active) {
 }
 
 function refreshSceneButtons() {
-  _sceneButtons.forEach((btn, i) => {
-    const slot   = i + 1;
+  _sceneButtons.forEach((btn, slot) => {
     const filled = localStorage.getItem(SCENE_KEY(slot)) !== null;
     applySlotStyle(btn, filled, activeSlot === slot);
   });
@@ -87,9 +87,8 @@ function createSceneContextMenu() {
     return item;
   };
 
-  const overwriteItem = makeItem('Overwrite with current');
-  const clearItem     = makeItem('Clear slot');
-  menu.append(overwriteItem, clearItem);
+  const clearItem = makeItem('Clear slot');
+  menu.append(clearItem);
   document.body.appendChild(menu);
 
   let currentSlot = null;
@@ -101,18 +100,10 @@ function createSceneContextMenu() {
     menu.style.display = 'block';
     // Clamp to viewport
     const mw = menu.offsetWidth  || 160;
-    const mh = menu.offsetHeight || 64;
+    const mh = menu.offsetHeight || 48;
     menu.style.left = `${Math.min(x, window.innerWidth  - mw - 8)}px`;
     menu.style.top  = `${Math.min(y, window.innerHeight - mh - 8)}px`;
   };
-
-  overwriteItem.addEventListener('click', () => {
-    if (currentSlot === null) return;
-    localStorage.setItem(SCENE_KEY(currentSlot), getLayersEncoded());
-    activeSlot = currentSlot;
-    refreshSceneButtons();
-    hide();
-  });
 
   clearItem.addEventListener('click', () => {
     if (currentSlot === null) return;
@@ -144,34 +135,29 @@ function initScenesPane(container, uiState = {}) {
 
   _sceneButtons = [];
 
-  for (let slot = 1; slot <= SCENE_COUNT; slot++) {
+  for (let slot = 0; slot < SCENE_COUNT; slot++) {
     const btn    = document.createElement('button');
-    btn.textContent = String(slot);
+    btn.textContent = String(slot + 1); // display 1-16, index 0-15
     const filled = localStorage.getItem(SCENE_KEY(slot)) !== null;
     applySlotStyle(btn, filled, false);
 
     btn.addEventListener('click', () => {
-      const stored  = localStorage.getItem(SCENE_KEY(slot));
-      const current = getLayersEncoded();
+      if (activeSlot === slot) return; // already active, nothing to do
 
-      // Confirm if switching away from the current slot with unsaved changes
-      if (activeSlot !== slot && getLayers().length > 0 && current !== stored) {
-        if (!confirm(`Load scene ${slot}? Current changes will be lost.`)) return;
+      // Confirm only when there's no active slot and work would be lost
+      if (activeSlot === null && getLayers().length > 0) {
+        if (!confirm(`Switch to scene ${slot}? Unsaved changes will be lost.`)) return;
       }
 
-      if (!stored) {
-        // Empty slot → clear the canvas
-        applyState([]);
-        activeSlot = slot;
-        rebuild();
-        refreshSceneButtons();
-        return;
+      const stored = localStorage.getItem(SCENE_KEY(slot));
+      if (stored) {
+        const data = decodeStoredScene(stored);
+        if (!data) { showWarning(`Scene ${slot} could not be loaded.`); return; }
+        applyState(deserializeLayers(data.layers ?? data));
+      } else {
+        applyState([]); // empty slot → blank canvas
       }
 
-      // Filled slot → load
-      const data = decodeStoredScene(stored);
-      if (!data) { showWarning(`Scene ${slot} could not be loaded.`); return; }
-      applyState(deserializeLayers(data.layers ?? data));
       activeSlot = slot;
       rebuild();
       refreshSceneButtons();
@@ -191,6 +177,9 @@ function initScenesPane(container, uiState = {}) {
   const content = pane.element.querySelector('.tp-rotv_c') ?? pane.element;
   content.appendChild(grid);
 
+  activeSlot = 0;
+  refreshSceneButtons();
+
   const clearBtn = document.createElement('button');
   clearBtn.textContent = 'Clear localStorage';
   clearBtn.style.cssText = `
@@ -200,8 +189,8 @@ function initScenesPane(container, uiState = {}) {
     font-family: inherit; padding: 4px; cursor: pointer;
   `;
   clearBtn.addEventListener('click', () => {
-    for (let i = 1; i <= SCENE_COUNT; i++) localStorage.removeItem(SCENE_KEY(i));
-    activeSlot = null;
+    for (let i = 0; i < SCENE_COUNT; i++) localStorage.removeItem(SCENE_KEY(i));
+    activeSlot = 0;
     refreshSceneButtons();
   });
   content.appendChild(clearBtn);

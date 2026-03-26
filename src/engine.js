@@ -39,7 +39,7 @@ function buildLayer(layer) {
 
 export function render(layers) {
   const visible = layers.filter(l => l.visible);
-  if (visible.length === 0) return;
+  if (visible.length === 0) { solid(0, 0, 0).out(o0); return; }
 
   // Composite all layers inline — no intermediate output buffers needed.
   // Each buildLayer() returns a Hydra chain node; compositing them directly
