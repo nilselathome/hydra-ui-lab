@@ -180,20 +180,39 @@ function initScenesPane(container, uiState = {}) {
   activeSlot = 0;
   refreshSceneButtons();
 
-  const clearBtn = document.createElement('button');
-  clearBtn.textContent = 'Clear localStorage';
-  clearBtn.style.cssText = `
-    display: block; width: calc(100% - 8px); margin: 4px 4px 6px;
-    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+  const btnRowStyle = `
+    display: flex; gap: 4px; margin: 4px 4px 6px;
+  `;
+  const btnBaseStyle = `
+    flex: 1; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
     border-radius: 2px; color: rgba(255,255,255,0.3); font-size: 9px;
     font-family: inherit; padding: 4px; cursor: pointer;
   `;
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = btnRowStyle;
+
+  const clearBtn = document.createElement('button');
+  clearBtn.textContent = 'Clear localStorage';
+  clearBtn.style.cssText = btnBaseStyle;
   clearBtn.addEventListener('click', () => {
     for (let i = 0; i < SCENE_COUNT; i++) localStorage.removeItem(SCENE_KEY(i));
     activeSlot = 0;
     refreshSceneButtons();
   });
-  content.appendChild(clearBtn);
+
+  const resetBtn = document.createElement('button');
+  resetBtn.textContent = 'Reset all';
+  resetBtn.style.cssText = btnBaseStyle;
+  resetBtn.addEventListener('click', () => {
+    for (let i = 0; i < SCENE_COUNT; i++) localStorage.removeItem(SCENE_KEY(i));
+    history.replaceState(null, '', location.pathname);
+    location.reload();
+  });
+
+  btnRow.appendChild(clearBtn);
+  btnRow.appendChild(resetBtn);
+  content.appendChild(btnRow);
 }
 
 export function initUI(container, uiState = {}) {

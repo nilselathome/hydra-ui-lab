@@ -106,7 +106,7 @@ export function addLayer(type, overrides = {}) {
     canvas.height = 1080;
     layer._canvas = canvas;
     drawTextCanvas(layer);
-    layer._hydraSource?.init({ src: canvas });
+    layer._hydraSource?.init({ src: canvas, dynamic: true });
   }
 
   layers.push(layer);
