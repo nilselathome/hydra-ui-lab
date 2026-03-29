@@ -509,10 +509,11 @@ function addImageDropZone(folder, layer) {
 }
 
 const TEXT_FONTS = [
-  'Arial', 'Arial Black', 'Comic Sans MS', 'Courier New', 'Georgia',
-  'Impact', 'Lucida Console', 'Palatino Linotype', 'Tahoma',
-  'Times New Roman', 'Trebuchet MS', 'Verdana',
-  'monospace', 'serif', 'sans-serif',
+  'Bebas Neue', 'Anton', 'Abril Fatface', 'Oswald', 'Righteous',
+  'Lobster', 'Pacifico', 'Raleway', 'Montserrat', 'Poppins',
+  'Playfair Display', 'Merriweather', 'Space Grotesk', 'DM Sans', 'Nunito',
+  'Ubuntu', 'Lato', 'Open Sans', 'Roboto', 'Roboto Condensed',
+  'PT Sans', 'Press Start 2P', 'Roboto Mono', 'Source Code Pro', 'Inconsolata',
 ];
 
 function addTextControls(folder, layer) {
@@ -532,9 +533,9 @@ function addTextControls(folder, layer) {
   textInput.placeholder = 'Enter text…';
   textInput.value = layer.textContent ?? '';
   textInput.style.cssText = `flex: 1; ${sharedInputStyle}`;
-  textInput.addEventListener('input', () => {
+  textInput.addEventListener('input', async () => {
     layer.textContent = textInput.value;
-    drawTextCanvas(layer);
+    await drawTextCanvas(layer);
     render(getLayers());
     save();
   });
@@ -556,9 +557,9 @@ function addTextControls(folder, layer) {
     if (font === layer.fontFamily) opt.selected = true;
     fontSelect.appendChild(opt);
   });
-  fontSelect.addEventListener('change', () => {
+  fontSelect.addEventListener('change', async () => {
     layer.fontFamily = fontSelect.value;
-    drawTextCanvas(layer);
+    await drawTextCanvas(layer);
     render(getLayers());
     save();
   });
@@ -566,9 +567,8 @@ function addTextControls(folder, layer) {
   content.appendChild(fontRow);
 }
 
-function onChange() {
-  // Redraw any text canvases whose params may have changed
-  getLayers().filter(l => l.type === 'text').forEach(drawTextCanvas);
+async function onChange() {
+  await Promise.all(getLayers().filter(l => l.type === 'text').map(drawTextCanvas));
   render(getLayers());
   save();
 }
