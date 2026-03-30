@@ -80,7 +80,7 @@ export const LAYER_TYPES = {
       { key: 'r',        label: 'R',          min: 0,  max: 1,    default: 1 },
       { key: 'g',        label: 'G',          min: 0,  max: 1,    default: 1 },
       { key: 'b',        label: 'B',          min: 0,  max: 1,    default: 1 },
-      { key: 'scrollSpd', label: 'Scroll spd', min: -4, max: 4,   default: 0, step: 0.05 },
+      { key: 'scrollSpd', label: 'Scroll spd', min: -1.5, max: 1.5, default: 0, step: 0.05 },
     ],
     // layer._hydraSource is an s0–s3 slot; layer._canvas is the offscreen canvas it samples
     build: (p, layer) => layer._hydraSource ? src(layer._hydraSource) : solid(0, 0, 0),

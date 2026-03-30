@@ -22,7 +22,21 @@ let scenesPaneExpanded = true;
 
 function save() {
   saveToUrl(getLayers(), { addPane: addPaneExpanded, audioPane: audioPaneExpanded, layersPane: layersPaneExpanded, scenesPane: scenesPaneExpanded });
-  if (activeSlot !== null) localStorage.setItem(SCENE_KEY(activeSlot), getLayersEncoded());
+  refreshSaveBtn();
+}
+
+function refreshSaveBtn() {
+  if (!_saveSceneBtn) return;
+  const dirty = _cleanEncoded !== null && getLayersEncoded() !== _cleanEncoded;
+  if (dirty) {
+    _saveSceneBtn.style.background   = 'rgba(255,150,40,0.3)';
+    _saveSceneBtn.style.borderColor  = 'rgba(255,150,40,0.7)';
+    _saveSceneBtn.style.color        = 'rgba(255,190,80,0.95)';
+  } else {
+    _saveSceneBtn.style.background   = '';
+    _saveSceneBtn.style.borderColor  = '';
+    _saveSceneBtn.style.color        = '';
+  }
 }
 
 // ── Scene slots ────────────────────────────────────────────────────────────────
@@ -30,6 +44,11 @@ const SCENE_COUNT = 16;
 const SCENE_KEY   = (n) => `hydra-scene-${n}`;
 let activeSlot    = null;   // slot index (0-based), or null
 let _sceneButtons = [];     // DOM button elements, index === slot
+let _saveSceneBtn  = null;
+let _clearSceneBtn = null;
+let _pasteSceneBtn = null;
+let _clipboard     = null;
+let _cleanEncoded  = null; // encoded state at last load/save — used to detect unsaved changes
 
 function getLayersEncoded() {
   // Store layer data only (no UI pane state) so comparisons aren't thrown off by fold changes
@@ -61,6 +80,14 @@ function refreshSceneButtons() {
     const filled = localStorage.getItem(SCENE_KEY(slot)) !== null;
     applySlotStyle(btn, filled, activeSlot === slot);
   });
+  const label = activeSlot !== null ? ` ${activeSlot + 1}` : '';
+  if (_saveSceneBtn)  _saveSceneBtn.textContent  = `Save${label}`;
+  if (_clearSceneBtn) _clearSceneBtn.textContent = `Clear${label}`;
+  if (_pasteSceneBtn) {
+    const hasClip = _clipboard !== null;
+    _pasteSceneBtn.style.opacity = hasClip ? '1' : '0.35';
+    _pasteSceneBtn.style.cursor  = hasClip ? 'pointer' : 'default';
+  }
 }
 
 // ── Scene context menu (singleton) ────────────────────────────────────────────
@@ -126,6 +153,7 @@ function createSceneContextMenu() {
 function initScenesPane(container, uiState = {}) {
   scenesPaneExpanded = uiState.scenesPane ?? true;
   const pane = new Pane({ container, title: 'Scenes', expanded: scenesPaneExpanded });
+  pane.element.style.marginBottom = '1rem';
   pane.on('fold', (ev) => { scenesPaneExpanded = ev.expanded; save(); });
 
   const contextMenu = createSceneContextMenu();
@@ -144,15 +172,10 @@ function initScenesPane(container, uiState = {}) {
     btn.addEventListener('click', () => {
       if (activeSlot === slot) return; // already active, nothing to do
 
-      // Confirm only when there's no active slot and work would be lost
-      if (activeSlot === null && getLayers().length > 0) {
-        if (!confirm(`Switch to scene ${slot}? Unsaved changes will be lost.`)) return;
-      }
-
       const stored = localStorage.getItem(SCENE_KEY(slot));
       if (stored) {
         const data = decodeStoredScene(stored);
-        if (!data) { showWarning(`Scene ${slot} could not be loaded.`); return; }
+        if (!data) { showWarning(`Scene ${slot + 1} could not be loaded.`); return; }
         applyState(deserializeLayers(data.layers ?? data));
       } else {
         applyState([]); // empty slot → blank canvas
@@ -160,7 +183,9 @@ function initScenesPane(container, uiState = {}) {
 
       activeSlot = slot;
       rebuild();
+      _cleanEncoded = getLayersEncoded();
       refreshSceneButtons();
+      refreshSaveBtn();
     });
 
     btn.addEventListener('contextmenu', (e) => {
@@ -189,8 +214,9 @@ function initScenesPane(container, uiState = {}) {
     font-family: inherit; padding: 4px; cursor: pointer;
   `;
 
-  const btnRow = document.createElement('div');
-  btnRow.style.cssText = btnRowStyle;
+  // Row 1: utility actions
+  const btnRow1 = document.createElement('div');
+  btnRow1.style.cssText = btnRowStyle;
 
   const clearBtn = document.createElement('button');
   clearBtn.textContent = 'Clear localStorage';
@@ -210,9 +236,66 @@ function initScenesPane(container, uiState = {}) {
     location.reload();
   });
 
-  btnRow.appendChild(clearBtn);
-  btnRow.appendChild(resetBtn);
-  content.appendChild(btnRow);
+  btnRow1.appendChild(clearBtn);
+  btnRow1.appendChild(resetBtn);
+
+  // Row 2: per-scene actions
+  const btnRow2 = document.createElement('div');
+  btnRow2.style.cssText = btnRowStyle;
+
+  const copyBtn = document.createElement('button');
+  copyBtn.textContent = 'Copy';
+  copyBtn.style.cssText = btnBaseStyle;
+  copyBtn.addEventListener('click', () => {
+    _clipboard = getLayersEncoded();
+    refreshSceneButtons();
+  });
+
+  _pasteSceneBtn = document.createElement('button');
+  _pasteSceneBtn.textContent = 'Paste';
+  _pasteSceneBtn.style.cssText = btnBaseStyle;
+  _pasteSceneBtn.addEventListener('click', () => {
+    if (!_clipboard) return;
+    if (getLayers().length > 0 && !confirm('Are you sure?')) return;
+    const data = decodeStoredScene(_clipboard);
+    if (!data) return;
+    applyState(deserializeLayers(data.layers ?? data));
+    rebuild();
+    refreshSceneButtons();
+  });
+
+  _saveSceneBtn = document.createElement('button');
+  _saveSceneBtn.style.cssText = btnBaseStyle;
+  _saveSceneBtn.addEventListener('click', () => {
+    if (activeSlot === null) return;
+    const encoded = getLayersEncoded();
+    localStorage.setItem(SCENE_KEY(activeSlot), encoded);
+    _cleanEncoded = encoded;
+    refreshSceneButtons();
+    refreshSaveBtn();
+  });
+
+  _clearSceneBtn = document.createElement('button');
+  _clearSceneBtn.style.cssText = btnBaseStyle;
+  _clearSceneBtn.addEventListener('click', () => {
+    if (activeSlot === null) return;
+    if (!confirm('Are you sure?')) return;
+    localStorage.removeItem(SCENE_KEY(activeSlot));
+    applyState([]);
+    rebuild();
+    _cleanEncoded = getLayersEncoded();
+    refreshSceneButtons();
+    refreshSaveBtn();
+  });
+
+  btnRow2.appendChild(copyBtn);
+  btnRow2.appendChild(_pasteSceneBtn);
+  btnRow2.appendChild(_saveSceneBtn);
+  btnRow2.appendChild(_clearSceneBtn);
+
+  content.appendChild(btnRow1);
+  content.appendChild(btnRow2);
+  refreshSceneButtons(); // set initial labels
 }
 
 export function initUI(container, uiState = {}) {
@@ -220,10 +303,12 @@ export function initUI(container, uiState = {}) {
   addPaneExpanded    = uiState.addPane    ?? true;
   layersPaneExpanded = uiState.layersPane ?? true;
 
+  initAudioPane(container, uiState);
+
   initScenesPane(container, uiState);
 
   addPane = new Pane({ container, title: 'Add Layer', expanded: addPaneExpanded });
-  addPane.element.style.marginTop = '1rem';
+  addPane.element.style.marginBottom = '1rem';
   addPane.on('fold', (ev) => { addPaneExpanded = ev.expanded; save(); });
   Object.entries(LAYER_TYPES).forEach(([type, def]) => {
     if (def.noLayer) return;
@@ -242,18 +327,16 @@ export function initUI(container, uiState = {}) {
     }
   });
 
-  initAudioPane(container, uiState);
-
   layersPane = new Pane({ container, title: 'Layers', expanded: layersPaneExpanded });
-  layersPane.element.style.marginTop = '1rem';
+  layersPane.element.style.marginBottom = '1rem';
   layersPane.on('fold', (ev) => { layersPaneExpanded = ev.expanded; save(); });
   buildLayersUI();
 }
 
 function initAudioPane(container, uiState = {}) {
-  audioPaneExpanded = uiState.audioPane ?? true;
+  audioPaneExpanded = uiState.audioPane ?? false;
   const pane = new Pane({ container, title: 'Audio', expanded: audioPaneExpanded });
-  pane.element.style.marginTop = '1rem';
+  pane.element.style.marginBottom = '1rem';
   pane.on('fold', (ev) => { audioPaneExpanded = ev.expanded; save(); });
 
   const smoothingObj = { smoothing: 0.8 };
