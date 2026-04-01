@@ -92,6 +92,8 @@ export function deserializeLayers(dataArray) {
 
 // ── URL encoding ──────────────────────────────────────────────────────────────
 
+const SCENE_KEY = (n) => `hydra-scene-${n}`;
+
 export function encodeState(layers, uiState = {}) {
   const payload = { layers: layers.map(serializeLayer), ui: uiState };
   return btoa(encodeURIComponent(JSON.stringify(payload)));
@@ -110,7 +112,27 @@ export function saveToUrl(layers, uiState = {}) {
   history.replaceState(null, '', location.pathname + hash);
 }
 
+export function saveSceneToUrl(slot) {
+  history.replaceState(null, '', location.pathname + `#scene=${slot + 1}`);
+}
+
 export function loadFromUrl() {
+  // Short scene URL: #scene=N (1-based)
+  const sceneMatch = location.hash.match(/^#scene=(\d+)$/);
+  if (sceneMatch) {
+    const slot = parseInt(sceneMatch[1], 10) - 1;
+    const stored = localStorage.getItem(SCENE_KEY(slot));
+    if (!stored) return { sceneSlot: slot, layers: [], ui: {} };
+    try {
+      const payload = JSON.parse(decodeURIComponent(atob(stored)));
+      const data = Array.isArray(payload) ? { layers: payload } : payload;
+      return { layers: data.layers ?? [], ui: data.ui ?? {}, sceneSlot: slot };
+    } catch {
+      return { sceneSlot: slot, layers: [], ui: {} };
+    }
+  }
+
+  // Full encoded state: #s=...
   const match = location.hash.match(/^#s=(.+)$/);
   if (!match) return null;
   try {

@@ -194,6 +194,11 @@ export function addLayer(type, overrides = {}) {
     layer._hydraSlot = slot;
     layer._hydraSource = slot !== null ? window[`s${slot}`] : null;
     layer.imgUrl = '';
+    if (layer._hydraSource) {
+      const blank = document.createElement('canvas');
+      blank.width = 1; blank.height = 1;
+      layer._hydraSource.init({ src: blank });
+    }
   }
 
   if (type === 'text') {

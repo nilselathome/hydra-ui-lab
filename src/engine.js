@@ -6,6 +6,17 @@ function animatedValue(animate, min, max) {
     return () => min + (a.fft[animate.band ?? 0] ?? 0) * range;
   if (animate.mode === 'sin')
     return () => min + (Math.sin(time * animate.speed) * 0.5 + 0.5) * range;
+  if (animate.mode === 'tan')
+    return () => min + (Math.atan(Math.tan(time * animate.speed * Math.PI)) / (Math.PI / 2) * 0.5 + 0.5) * range;
+  if (animate.mode === 'square')
+    return () => Math.sin(time * animate.speed * Math.PI) >= 0 ? max : min;
+  if (animate.mode === 'random') {
+    return () => {
+      const step = Math.floor(time * animate.speed);
+      const r = Math.sin(step * 127.1) * 43758.5453123;
+      return min + (r - Math.floor(r)) * range;
+    };
+  }
   return () => min + ((time * animate.speed) % range);
 }
 

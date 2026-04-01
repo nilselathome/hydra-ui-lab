@@ -16,6 +16,6 @@ setTimeout(() => {
   const savedData = loadFromUrl();
   if (savedData) applyState(deserializeLayers(savedData.layers ?? savedData));
 
-  initUI(document.getElementById('ui'), savedData?.ui ?? {});
+  initUI(document.getElementById('ui'), savedData?.ui ?? {}, savedData?.sceneSlot ?? null);
   render(getLayers());
 }, 500);

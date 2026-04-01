@@ -2,7 +2,7 @@ import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpan
 import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
 import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, applyState } from './layers.js';
 import { render } from './engine.js';
-import { saveToUrl, showWarning, encodeState, deserializeLayers } from './state.js';
+import { saveToUrl, saveSceneToUrl, showWarning, encodeState, deserializeLayers } from './state.js';
 import * as Audio from './audio.js';
 
 function formatTime(s) {
@@ -21,7 +21,13 @@ let layersPaneExpanded = true;
 let scenesPaneExpanded = true;
 
 function save() {
-  saveToUrl(getLayers(), { addPane: addPaneExpanded, audioPane: audioPaneExpanded, layersPane: layersPaneExpanded, scenesPane: scenesPaneExpanded });
+  const encoded = getLayersEncoded();
+  const isSaved = activeSlot !== null && _cleanEncoded !== null && encoded === _cleanEncoded;
+  if (isSaved) {
+    saveSceneToUrl(activeSlot);
+  } else {
+    saveToUrl(getLayers(), { addPane: addPaneExpanded, audioPane: audioPaneExpanded, layersPane: layersPaneExpanded, scenesPane: scenesPaneExpanded });
+  }
   refreshSaveBtn();
 }
 
@@ -150,7 +156,7 @@ function createSceneContextMenu() {
   return { show, hide };
 }
 
-function initScenesPane(container, uiState = {}) {
+function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   scenesPaneExpanded = uiState.scenesPane ?? true;
   const pane = new Pane({ container, title: 'Scenes', expanded: scenesPaneExpanded });
   pane.element.style.marginBottom = '1rem';
@@ -171,6 +177,9 @@ function initScenesPane(container, uiState = {}) {
 
     btn.addEventListener('click', () => {
       if (activeSlot === slot) return; // already active, nothing to do
+
+      const dirty = _cleanEncoded !== null && getLayersEncoded() !== _cleanEncoded;
+      if (dirty && !confirm('Discard unsaved changes?')) return;
 
       const stored = localStorage.getItem(SCENE_KEY(slot));
       if (stored) {
@@ -202,7 +211,8 @@ function initScenesPane(container, uiState = {}) {
   const content = pane.element.querySelector('.tp-rotv_c') ?? pane.element;
   content.appendChild(grid);
 
-  activeSlot = 0;
+  activeSlot = initialSceneSlot ?? 0;
+  if (initialSceneSlot !== null) _cleanEncoded = getLayersEncoded();
   refreshSceneButtons();
 
   const btnRowStyle = `
@@ -273,6 +283,7 @@ function initScenesPane(container, uiState = {}) {
     _cleanEncoded = encoded;
     refreshSceneButtons();
     refreshSaveBtn();
+    saveSceneToUrl(activeSlot);
   });
 
   _clearSceneBtn = document.createElement('button');
@@ -298,14 +309,14 @@ function initScenesPane(container, uiState = {}) {
   refreshSceneButtons(); // set initial labels
 }
 
-export function initUI(container, uiState = {}) {
+export function initUI(container, uiState = {}, initialSceneSlot = null) {
   uiContainer = container;
   addPaneExpanded    = uiState.addPane    ?? true;
   layersPaneExpanded = uiState.layersPane ?? true;
 
   initAudioPane(container, uiState);
 
-  initScenesPane(container, uiState);
+  initScenesPane(container, uiState, initialSceneSlot);
 
   addPane = new Pane({ container, title: 'Add Layer', expanded: addPaneExpanded });
   addPane.element.style.marginBottom = '1rem';
@@ -572,9 +583,11 @@ function addImageDropZone(folder, layer) {
   const loadFile = (file) => {
     if (!file?.type.startsWith('image/')) return;
     const url = URL.createObjectURL(file);
+    layer.imgUrl = url;
     layer._hydraSource.initImage(url);
     zone.textContent = `✓ ${file.name}`;
     render(getLayers());
+    save();
   };
 
   zone.addEventListener('dragover',  (e) => { e.preventDefault(); highlight(true); });
@@ -747,7 +760,7 @@ function buildLayersUI() {
           tAnimFolder.addBinding(anim, 'max', { label: 'Max', min: p.min, max: p.max, step })
             .on('change', onChange);
           tAnimFolder.addBinding(anim, 'mode', {
-            label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Audio': 'audio' },
+            label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Tangent': 'tan', 'Square': 'square', 'Random': 'random', 'Audio': 'audio' },
           }).on('change', () => { anim._expanded = true; rebuild(); });
           if (anim.mode === 'audio') {
             tAnimFolder.addBinding(anim, 'band', {
@@ -818,7 +831,7 @@ function buildLayersUI() {
         animFolder.addBinding(mod.animate, 'max', { label: 'Max', min: fnCfg.min, max: fnCfg.max, step: fnCfg.step })
           .on('change', onChange);
         animFolder.addBinding(mod.animate, 'mode', {
-          label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Audio': 'audio' },
+          label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Tangent': 'tan', 'Square': 'square', 'Random': 'random', 'Audio': 'audio' },
         }).on('change', () => { mod.animate._expanded = true; rebuild(); });
         if (mod.animate.mode === 'audio') {
           animFolder.addBinding(mod.animate, 'band', {
