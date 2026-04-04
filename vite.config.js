@@ -1,5 +1,3 @@
 export default {
-    build: {
-        outputDir: '/hydra-ui-lab'
-    }
+    base: '/hydra-ui-lab/'
 }
