@@ -1,6 +1,9 @@
 # hydra-ui-lab
 
-A frontend for [Hydra](https://hydra.ojack.xyz/) using Tweakpane for the controls. Work in progress. **Mostly Claude code. Experimental.**
+04/04/25: Should have checked first 😅 - there is a very promising project here: [Patchies!](https://github.com/heypoom/patchies)
+
+
+This is an experimental frontend for [Hydra](https://hydra.ojack.xyz/) using Tweakpane for the controls. Work in progress. **Mostly Claude code. Experimental.**
 
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/4de1a41d-9b9e-45d3-a403-e377c90cbe16" />
 
