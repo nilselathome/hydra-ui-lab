@@ -232,6 +232,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   clearBtn.textContent = 'Clear localStorage';
   clearBtn.style.cssText = btnBaseStyle;
   clearBtn.addEventListener('click', () => {
+    if (!confirm('Clear all saved scenes? This cannot be undone.')) return;
     for (let i = 0; i < SCENE_COUNT; i++) localStorage.removeItem(SCENE_KEY(i));
     activeSlot = 0;
     refreshSceneButtons();
