@@ -1,4 +1,5 @@
 import { LAYER_TYPES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
+import { getImage } from './imageStore.js';
 
 let layers = [];
 let nextId = 1;
@@ -193,7 +194,8 @@ export function addLayer(type, overrides = {}) {
     const slot = allocateSlot();
     layer._hydraSlot = slot;
     layer._hydraSource = slot !== null ? window[`s${slot}`] : null;
-    layer.imgUrl = '';
+    layer.imgUrl  = '';
+    layer.imgName = '';
     if (layer._hydraSource) {
       const blank = document.createElement('canvas');
       blank.width = 1; blank.height = 1;
@@ -244,8 +246,15 @@ export function applyState(dataArray) {
     layer.transforms = data.transforms ?? [];
     layer.mods       = data.mods       ?? [];
     if (data.type === 'img' && data.imgUrl) {
-      layer.imgUrl = data.imgUrl;
-      layer._hydraSource?.initImage(data.imgUrl);
+      layer.imgUrl  = data.imgUrl;
+      layer.imgName = data.imgName || '';
+      if (data.imgUrl.startsWith('idb:')) {
+        getImage(data.imgUrl).then(blob => {
+          if (blob) layer._hydraSource?.initImage(URL.createObjectURL(blob));
+        });
+      } else {
+        layer._hydraSource?.initImage(data.imgUrl);
+      }
     }
     if (data.type === 'text') {
       layer.textContent = data.textContent ?? 'Text';

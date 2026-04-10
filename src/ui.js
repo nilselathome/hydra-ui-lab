@@ -3,6 +3,7 @@ import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from 
 import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, applyState } from './layers.js';
 import { render } from './engine.js';
 import { saveToUrl, saveSceneToUrl, showWarning, encodeState, deserializeLayers } from './state.js';
+import { storeImage } from './imageStore.js';
 import * as Audio from './audio.js';
 
 function formatTime(s) {
@@ -179,15 +180,19 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
       if (activeSlot === slot) return; // already active, nothing to do
 
       const dirty = _cleanEncoded !== null && getLayersEncoded() !== _cleanEncoded;
-      if (dirty && !confirm('Discard unsaved changes?')) return;
 
       const stored = localStorage.getItem(SCENE_KEY(slot));
       if (stored) {
+        if (dirty && !confirm('Discard unsaved changes?')) return;
         const data = decodeStoredScene(stored);
         if (!data) { showWarning(`Scene ${slot + 1} could not be loaded.`); return; }
         applyState(deserializeLayers(data.layers ?? data));
+      } else if (dirty) {
+        // Empty slot + unsaved changes → save current scene here instead of blanking
+        const encoded = getLayersEncoded();
+        localStorage.setItem(SCENE_KEY(slot), encoded);
       } else {
-        applyState([]); // empty slot → blank canvas
+        applyState([]); // empty slot, nothing dirty → blank canvas
       }
 
       activeSlot = slot;
@@ -532,7 +537,9 @@ function addImageDropZone(folder, layer) {
     cursor: pointer;
     transition: border-color 0.15s, color 0.15s;
   `;
-  zone.textContent = layer._hydraSource ? '↓ Drop image or click to browse' : '⚠ No source slots available';
+  zone.textContent = layer._hydraSource
+    ? (layer.imgName ? `✓ ${layer.imgName}` : '↓ Drop image or click to browse')
+    : '⚠ No source slots available';
 
   if (!layer._hydraSource) { content.appendChild(zone); return; }
 
@@ -542,7 +549,7 @@ function addImageDropZone(folder, layer) {
   const urlInput = document.createElement('input');
   urlInput.type = 'url';
   urlInput.placeholder = 'https://image-url…';
-  urlInput.value = layer.imgUrl || '';
+  urlInput.value = (layer.imgUrl && !layer.imgUrl.startsWith('idb:')) ? layer.imgUrl : '';
   urlInput.style.cssText = `
     flex: 1; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);
     border-radius: 2px; color: #fff; font-size: 10px; font-family: inherit;
@@ -565,7 +572,8 @@ function addImageDropZone(folder, layer) {
     if (url.length > 500) {
       showWarning('Image URL is very long and may make sharing impractical.');
     }
-    layer.imgUrl = url;
+    layer.imgUrl  = url;
+    layer.imgName = '';
     layer._hydraSource.initImage(url);
     zone.textContent = `✓ ${url.split('/').pop() || url}`;
     render(getLayers());
@@ -581,11 +589,16 @@ function addImageDropZone(folder, layer) {
     zone.style.color       = on ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)';
   };
 
-  const loadFile = (file) => {
+  const loadFile = async (file) => {
     if (!file?.type.startsWith('image/')) return;
-    const url = URL.createObjectURL(file);
-    layer.imgUrl = url;
-    layer._hydraSource.initImage(url);
+    if (file.size > 5 * 1024 * 1024) {
+      const mb = (file.size / (1024 * 1024)).toFixed(1);
+      if (!confirm(`This image is ${mb} MB. Large images may slow down the playground. Continue?`)) return;
+    }
+    const idbRef = await storeImage(file);
+    layer.imgUrl  = idbRef;
+    layer.imgName = file.name;
+    layer._hydraSource.initImage(URL.createObjectURL(file));
     zone.textContent = `✓ ${file.name}`;
     render(getLayers());
     save();
