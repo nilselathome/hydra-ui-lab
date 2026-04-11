@@ -1,5 +1,18 @@
 import { LAYER_TYPES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
 
+// Solve cubic bezier Y for a given X via binary search (8 iterations ≈ 0.4% precision).
+// Curve goes from (0,0) to (1,1); control points are (x1,y1) and (x2,y2).
+function bezierY(x1, y1, x2, y2, x) {
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 8; i++) {
+    const mid = (lo + hi) / 2;
+    const bx = 3*(1-mid)*(1-mid)*mid*x1 + 3*(1-mid)*mid*mid*x2 + mid*mid*mid;
+    bx < x ? lo = mid : hi = mid;
+  }
+  const t = (lo + hi) / 2;
+  return 3*(1-t)*(1-t)*t*y1 + 3*(1-t)*t*t*y2 + t*t*t;
+}
+
 function animatedValue(animate, min, max) {
   const range = max - min;
   if (animate.mode === 'audio')
@@ -15,6 +28,14 @@ function animatedValue(animate, min, max) {
       const step = Math.floor(time * animate.speed);
       const r = Math.sin(step * 127.1) * 43758.5453123;
       return min + (r - Math.floor(r)) * range;
+    };
+  }
+  if (animate.mode === 'bezier') {
+    return () => {
+      const [x1, y1, x2, y2] = animate.bezier ?? [0.5, 0, 0.5, 1];
+      const raw   = (time * animate.speed) % 2;
+      const phase = raw <= 1 ? raw : 2 - raw; // ping-pong 0→1→0
+      return min + bezierY(x1, y1, x2, y2, phase) * range;
     };
   }
   return () => min + ((time * animate.speed) % range);

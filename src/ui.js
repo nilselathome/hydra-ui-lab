@@ -677,6 +677,150 @@ function addTextControls(folder, layer) {
   content.appendChild(fontRow);
 }
 
+// ── Bezier curve editor ───────────────────────────────────────────────────────
+// Injects a small canvas + preset buttons into a Tweakpane folder element.
+// `anim`     — the animate object whose `bezier` array ([x1,y1,x2,y2]) is mutated
+// `folderEl` — the Tweakpane folder's DOM element to append into
+// `onchange` — called after each control-point move
+function buildBezierEditor(anim, folderEl, onchange) {
+  const W = 112, H = 80, PAD = 8, R = 5;
+  // Y axis allows slight overshoot: bezier Y maps [−0.5, 1.5] → canvas [H, 0]
+  const Y_MIN = -0.5, Y_MAX = 1.5, Y_RANGE = Y_MAX - Y_MIN;
+
+  const toCanvas  = (bx, by) => [(bx * (W - PAD*2)) + PAD, ((Y_MAX - by) / Y_RANGE) * (H - PAD*2) + PAD];
+  const fromCanvas = (cx, cy) => [
+    Math.max(0, Math.min(1,       (cx - PAD) / (W - PAD*2))),
+    Math.max(Y_MIN, Math.min(Y_MAX, Y_MAX - (cy - PAD) / (H - PAD*2) * Y_RANGE)),
+  ];
+
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'margin: 2px 4px 4px; user-select: none;';
+
+  const canvas = document.createElement('canvas');
+  canvas.width  = W;
+  canvas.height = H;
+  canvas.style.cssText = `display:block; width:${W}px; height:${H}px; cursor:crosshair;
+    background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.1); border-radius:2px;`;
+
+  function draw() {
+    const [x1, y1, x2, y2] = anim.bezier;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+
+    // Guide lines from anchors to handles
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 3]);
+    const [ax0, ay0] = toCanvas(0, 0);
+    const [ax3, ay3] = toCanvas(1, 1);
+    const [hx1, hy1] = toCanvas(x1, y1);
+    const [hx2, hy2] = toCanvas(x2, y2);
+    ctx.beginPath(); ctx.moveTo(ax0, ay0); ctx.lineTo(hx1, hy1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ax3, ay3); ctx.lineTo(hx2, hy2); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Bezier curve (40 samples)
+    ctx.strokeStyle = 'rgba(100,200,255,0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i <= 40; i++) {
+      const t  = i / 40;
+      const bx = 3*(1-t)*(1-t)*t*x1 + 3*(1-t)*t*t*x2 + t*t*t;
+      const by = 3*(1-t)*(1-t)*t*y1 + 3*(1-t)*t*t*y2 + t*t*t;
+      const [cx, cy] = toCanvas(bx, by);
+      i === 0 ? ctx.moveTo(cx, cy) : ctx.lineTo(cx, cy);
+    }
+    ctx.stroke();
+
+    // Anchor dots (fixed)
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    [[0,0],[1,1]].forEach(([bx,by]) => {
+      const [cx,cy] = toCanvas(bx,by);
+      ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI*2); ctx.fill();
+    });
+
+    // Handle dots (draggable)
+    [[x1,y1,'rgba(255,180,60,0.95)'],[x2,y2,'rgba(80,220,120,0.95)']].forEach(([bx,by,col]) => {
+      const [cx,cy] = toCanvas(bx,by);
+      ctx.fillStyle = col;
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.fill();
+    });
+  }
+
+  // Drag logic
+  let dragging = null; // 0 = P1, 1 = P2
+  function hitTest(cx, cy) {
+    const pts = [[anim.bezier[0], anim.bezier[1]], [anim.bezier[2], anim.bezier[3]]];
+    for (let i = 0; i < 2; i++) {
+      const [hx, hy] = toCanvas(pts[i][0], pts[i][1]);
+      if (Math.hypot(cx - hx, cy - hy) <= R + 3) return i;
+    }
+    return null;
+  }
+  function getPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const src  = e.touches ? e.touches[0] : e;
+    return [src.clientX - rect.left, src.clientY - rect.top];
+  }
+  function onDown(e)  { e.preventDefault(); const [cx,cy] = getPos(e); dragging = hitTest(cx,cy); }
+  function onMove(e)  {
+    if (dragging === null) return;
+    e.preventDefault();
+    const [cx,cy] = getPos(e);
+    const [bx,by] = fromCanvas(cx,cy);
+    if (dragging === 0) { anim.bezier[0] = bx; anim.bezier[1] = by; }
+    else                { anim.bezier[2] = bx; anim.bezier[3] = by; }
+    draw();
+    onchange();
+  }
+  function onUp() { dragging = null; }
+
+  const ac = new AbortController();
+  const sig = { signal: ac.signal };
+  canvas.addEventListener('mousedown',  onDown);
+  canvas.addEventListener('touchstart', onDown, { passive: false });
+  window.addEventListener('mousemove',  onMove, sig);
+  window.addEventListener('touchmove',  onMove, { ...sig, passive: false });
+  window.addEventListener('mouseup',    onUp,   sig);
+  window.addEventListener('touchend',   onUp,   sig);
+  // Clean up when the canvas is removed from the DOM (on rebuild)
+  new MutationObserver(() => { if (!canvas.isConnected) ac.abort(); })
+    .observe(document.body, { childList: true, subtree: true });
+
+  // Preset buttons
+  const presets = [
+    { label: 'Linear',   v: [0, 0, 1, 1] },
+    { label: 'Ease In',  v: [0.42, 0, 1, 1] },
+    { label: 'Ease Out', v: [0, 0, 0.58, 1] },
+    { label: 'Ease',     v: [0.42, 0, 0.58, 1] },
+  ];
+  const presetRow = document.createElement('div');
+  presetRow.style.cssText = 'display:flex; gap:3px; margin-top:4px; flex-wrap:wrap;';
+  presets.forEach(({ label, v }) => {
+    const btn = document.createElement('button');
+    btn.textContent = label;
+    btn.style.cssText = `
+      flex:1; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.15);
+      border-radius:2px; color:rgba(255,255,255,0.7); font-size:9px; font-family:inherit;
+      padding:3px 4px; cursor:pointer; min-width:0;
+    `;
+    btn.addEventListener('click', () => {
+      anim.bezier = [...v];
+      draw();
+      onchange();
+    });
+    presetRow.appendChild(btn);
+  });
+
+  wrap.appendChild(canvas);
+  wrap.appendChild(presetRow);
+
+  const content = folderEl.querySelector('.tp-fldv_c') ?? folderEl;
+  content.appendChild(wrap);
+
+  draw();
+}
+
 async function onChange() {
   await Promise.all(getLayers().filter(l => l.type === 'text').map(drawTextCanvas));
   render(getLayers());
@@ -774,7 +918,7 @@ function buildLayersUI() {
           tAnimFolder.addBinding(anim, 'max', { label: 'Max', min: p.min, max: p.max, step })
             .on('change', onChange);
           tAnimFolder.addBinding(anim, 'mode', {
-            label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Tangent': 'tan', 'Square': 'square', 'Random': 'random', 'Audio': 'audio' },
+            label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Tangent': 'tan', 'Square': 'square', 'Random': 'random', 'Audio': 'audio', 'Bezier': 'bezier' },
           }).on('change', () => { anim._expanded = true; rebuild(); });
           if (anim.mode === 'audio') {
             tAnimFolder.addBinding(anim, 'band', {
@@ -783,6 +927,9 @@ function buildLayersUI() {
           } else {
             tAnimFolder.addBinding(anim, 'speed', { label: 'Speed', min: 0.01, max: 5, step: 0.01 })
               .on('change', onChange);
+          }
+          if (anim.mode === 'bezier') {
+            buildBezierEditor(anim, tAnimFolder.element, onChange);
           }
         }
       });
@@ -845,7 +992,7 @@ function buildLayersUI() {
         animFolder.addBinding(mod.animate, 'max', { label: 'Max', min: fnCfg.min, max: fnCfg.max, step: fnCfg.step })
           .on('change', onChange);
         animFolder.addBinding(mod.animate, 'mode', {
-          label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Tangent': 'tan', 'Square': 'square', 'Random': 'random', 'Audio': 'audio' },
+          label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Tangent': 'tan', 'Square': 'square', 'Random': 'random', 'Audio': 'audio', 'Bezier': 'bezier' },
         }).on('change', () => { mod.animate._expanded = true; rebuild(); });
         if (mod.animate.mode === 'audio') {
           animFolder.addBinding(mod.animate, 'band', {
@@ -854,6 +1001,9 @@ function buildLayersUI() {
         } else {
           animFolder.addBinding(mod.animate, 'speed', { label: 'Speed', min: 0.01, max: 5, step: 0.01 })
             .on('change', onChange);
+        }
+        if (mod.animate.mode === 'bezier') {
+          buildBezierEditor(mod.animate, animFolder.element, onChange);
         }
       }
 
