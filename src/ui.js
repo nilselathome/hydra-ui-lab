@@ -247,6 +247,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   resetBtn.textContent = 'Reset all';
   resetBtn.style.cssText = btnBaseStyle;
   resetBtn.addEventListener('click', () => {
+    if (!confirm('Delete all saved scenes and reset the app? This cannot be undone.')) return;
     for (let i = 0; i < SCENE_COUNT; i++) localStorage.removeItem(SCENE_KEY(i));
     history.replaceState(null, '', location.pathname);
     location.reload();
@@ -401,6 +402,34 @@ function initAudioPane(container, uiState = {}) {
   });
   pane.element.appendChild(zone);
 
+  // ── URL input ─────────────────────────────────────────────────────────────
+  const urlRow = document.createElement('div');
+  urlRow.style.cssText = 'display:flex; gap:4px; margin: 2px 4px 4px;';
+  const urlInput = document.createElement('input');
+  urlInput.type = 'url';
+  urlInput.placeholder = 'https://audio-url…';
+  urlInput.style.cssText = `
+    flex: 1; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 2px; color: #fff; font-size: 10px; font-family: inherit;
+    padding: 4px 6px; outline: none;
+  `;
+  const urlLoadBtn = document.createElement('button');
+  urlLoadBtn.textContent = 'Load';
+  urlLoadBtn.style.cssText = `
+    background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 2px; color: #fff; font-size: 10px; font-family: inherit;
+    padding: 4px 8px; cursor: pointer;
+  `;
+  const applyAudioUrl = () => {
+    const url = urlInput.value.trim();
+    if (!url) return;
+    runAsync(() => Promise.resolve(Audio.connectUrl(url)));
+  };
+  urlLoadBtn.addEventListener('click', applyAudioUrl);
+  urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyAudioUrl(); });
+  urlRow.append(urlInput, urlLoadBtn);
+  pane.element.appendChild(urlRow);
+
   // ── Playback controls (shown when file is loaded) ─────────────────────────
   const css = (el, styles) => Object.assign(el.style, styles);
   const btn = (label, title) => {
@@ -480,10 +509,12 @@ function initAudioPane(container, uiState = {}) {
   // ── Callbacks ──────────────────────────────────────────────────────────────
   Audio.setStatusCallback((st, label) => {
     if (st === 'file' || st === 'file-paused') {
-      zone.style.display = 'none';
+      zone.style.display    = 'none';
+      urlRow.style.display  = 'none';
       controls.style.display = 'flex';
     } else {
-      zone.style.display = '';
+      zone.style.display    = '';
+      urlRow.style.display  = '';
       controls.style.display = 'none';
       if (st === 'none') zone.textContent = '↓ Drop audio file or click to browse';
       else zone.textContent = label;
@@ -543,6 +574,47 @@ function addImageDropZone(folder, layer) {
 
   if (!layer._hydraSource) { content.appendChild(zone); return; }
 
+  // Preset image select
+  const PRESET_IMAGES = [
+    'IMG_0162.png',
+    'IMG_0551.gif',
+    'IMG_0672.png',
+    'IMG_0685.gif',
+    'IMG_0762.png',
+    'IMG_1240.JPG',
+    'IMG_3810.png',
+  ];
+  const presetSelect = document.createElement('select');
+  presetSelect.style.cssText = `
+    width: calc(100% - 8px); margin: 4px 4px 0; box-sizing: border-box;
+    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 2px; color: #fff; font-size: 10px; font-family: inherit;
+    padding: 4px 6px; outline: none; cursor: pointer;
+  `;
+  const blankOpt = document.createElement('option');
+  blankOpt.value = '';
+  blankOpt.textContent = '— preset images —';
+  presetSelect.appendChild(blankOpt);
+  PRESET_IMAGES.forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    if (layer.imgName === name) opt.selected = true;
+    presetSelect.appendChild(opt);
+  });
+  presetSelect.addEventListener('change', () => {
+    const name = presetSelect.value;
+    if (!name) return;
+    const url = `${import.meta.env.BASE_URL}${name}`;
+    layer.imgUrl  = url;
+    layer.imgName = name;
+    layer._hydraSource.initImage(url);
+    zone.textContent = `✓ ${name}`;
+    render(getLayers());
+    save();
+  });
+  content.appendChild(presetSelect);
+
   // URL input
   const urlRow = document.createElement('div');
   urlRow.style.cssText = 'display:flex; gap:4px; margin: 4px 4px 0;';
@@ -576,6 +648,7 @@ function addImageDropZone(folder, layer) {
     layer.imgName = '';
     layer._hydraSource.initImage(url);
     zone.textContent = `✓ ${url.split('/').pop() || url}`;
+    presetSelect.value = '';
     render(getLayers());
     save();
   };
@@ -600,6 +673,7 @@ function addImageDropZone(folder, layer) {
     layer.imgName = file.name;
     layer._hydraSource.initImage(URL.createObjectURL(file));
     zone.textContent = `✓ ${file.name}`;
+    presetSelect.value = '';
     render(getLayers());
     save();
   };

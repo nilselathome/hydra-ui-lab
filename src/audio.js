@@ -129,6 +129,38 @@ export async function connectTab() {
   notifyPlayback();
 }
 
+export function connectUrl(url) {
+  teardownAnalyser();
+  teardownStream();
+  teardownFile();
+
+  const ctx = getCtx();
+  const el  = new Audio();
+  el.crossOrigin = 'anonymous';
+  el.src    = url;
+  el.loop   = true;
+  document.body.appendChild(el);
+  activeEl    = el;
+  currentFile = { name: url.split('/').pop() || url };
+
+  const source = ctx.createMediaElementSource(el);
+  source.connect(ctx.destination);
+  attachAnalyser(source);
+
+  el.addEventListener('timeupdate', () => {
+    if (loopA !== null && loopB !== null) {
+      const a = Math.min(loopA, loopB);
+      const b = Math.max(loopA, loopB);
+      if (el.currentTime > b) el.currentTime = a;
+    }
+    notifyPlayback();
+  });
+
+  el.play().catch(() => {}); // autoplay may be blocked; user can press play
+  notify('file', currentFile.name);
+  notifyPlayback();
+}
+
 export function connectFile(file) {
   teardownAnalyser();
   teardownStream();
