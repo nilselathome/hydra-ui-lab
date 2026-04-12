@@ -21,6 +21,7 @@ let addPaneExpanded    = true;
 let audioPaneExpanded  = true;
 let layersPaneExpanded = true;
 let scenesPaneExpanded = true;
+let audioLibraryTrack  = null; // filename of active library track, or null
 
 function save() {
   const encoded = getLayersEncoded();
@@ -28,7 +29,7 @@ function save() {
   if (isSaved) {
     saveSceneToUrl(activeSlot);
   } else {
-    saveToUrl(getLayers(), { addPane: addPaneExpanded, audioPane: audioPaneExpanded, layersPane: layersPaneExpanded, scenesPane: scenesPaneExpanded });
+    saveToUrl(getLayers(), { addPane: addPaneExpanded, audioPane: audioPaneExpanded, layersPane: layersPaneExpanded, scenesPane: scenesPaneExpanded, audioTrack: audioLibraryTrack });
   }
   refreshSaveBtn();
 }
@@ -365,9 +366,11 @@ function initAudioPane(container, uiState = {}) {
     catch (e) { showWarning(e.message ?? 'Audio error'); }
   };
 
-  pane.addButton({ title: 'Mic' }).on('click', () => runAsync(Audio.connectMic));
-  pane.addButton({ title: 'Tab / Screen audio' }).on('click', () => runAsync(Audio.connectTab));
-  pane.addButton({ title: 'Stop' }).on('click', () => Audio.stop());
+  const clearLibraryTrack = () => { audioLibraryTrack = null; save(); };
+
+  pane.addButton({ title: 'Mic' }).on('click', () => { clearLibraryTrack(); runAsync(Audio.connectMic); });
+  pane.addButton({ title: 'Tab / Screen audio' }).on('click', () => { clearLibraryTrack(); runAsync(Audio.connectTab); });
+  pane.addButton({ title: 'Stop' }).on('click', () => { clearLibraryTrack(); Audio.stop(); });
 
   pane.addBinding(smoothingObj, 'smoothing', { label: 'Smoothing', min: 0, max: 1, step: 0.01 })
     .on('change', () => Audio.setSmoothing(smoothingObj.smoothing));
@@ -389,6 +392,7 @@ function initAudioPane(container, uiState = {}) {
   };
   const loadFile = (file) => {
     if (!file?.type.startsWith('audio/')) { showWarning('Please drop an audio file.'); return; }
+    clearLibraryTrack();
     Audio.connectFile(file);
   };
 
@@ -427,9 +431,13 @@ function initAudioPane(container, uiState = {}) {
       libSelect.appendChild(opt);
     }
     libSelect.addEventListener('change', () => {
+      const filename = libraryTracks[libSelect.selectedIndex - 1]; // -1 for placeholder
       const url = libSelect.value;
       libSelect.value = '';
-      if (url) runAsync(() => Promise.resolve(Audio.connectUrl(url)));
+      if (!url) return;
+      audioLibraryTrack = filename;
+      save();
+      runAsync(() => Promise.resolve(Audio.connectUrl(url)));
     });
     libRow.appendChild(libSelect);
     pane.element.appendChild(libRow);
@@ -456,6 +464,7 @@ function initAudioPane(container, uiState = {}) {
   const applyAudioUrl = () => {
     const url = urlInput.value.trim();
     if (!url) return;
+    clearLibraryTrack();
     runAsync(() => Promise.resolve(Audio.connectUrl(url)));
   };
   urlLoadBtn.addEventListener('click', applyAudioUrl);
@@ -491,7 +500,7 @@ function initAudioPane(container, uiState = {}) {
   css(ejectBtn, { padding: '2px 5px', background: 'none', border: 'none', color: 'rgba(255,255,255,0.35)' });
   ejectBtn.addEventListener('mouseenter', () => { ejectBtn.style.color = 'rgba(255,255,255,0.8)'; });
   ejectBtn.addEventListener('mouseleave', () => { ejectBtn.style.color = 'rgba(255,255,255,0.35)'; });
-  ejectBtn.addEventListener('click', () => Audio.ejectFile());
+  ejectBtn.addEventListener('click', () => { clearLibraryTrack(); Audio.ejectFile(); });
   nameRow.append(nameLabel, ejectBtn);
 
   // Seek bar row
@@ -585,6 +594,13 @@ function initAudioPane(container, uiState = {}) {
       abLabel.textContent = '';
     }
   });
+
+  // ── Auto-connect library track from saved state ───────────────────────────
+  if (uiState.audioTrack && libraryTracks.includes(uiState.audioTrack)) {
+    audioLibraryTrack = uiState.audioTrack;
+    const url = import.meta.env.BASE_URL + uiState.audioTrack;
+    runAsync(() => Promise.resolve(Audio.connectUrl(url)));
+  }
 }
 
 function addImageDropZone(folder, layer) {
