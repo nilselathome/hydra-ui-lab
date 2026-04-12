@@ -5,6 +5,7 @@ import { render } from './engine.js';
 import { saveToUrl, saveSceneToUrl, showWarning, encodeState, deserializeLayers } from './state.js';
 import { storeImage } from './imageStore.js';
 import * as Audio from './audio.js';
+import { tracks as libraryTracks } from './audioLibrary.js';
 
 function formatTime(s) {
   if (!isFinite(s) || s < 0) return '0:00';
@@ -402,6 +403,38 @@ function initAudioPane(container, uiState = {}) {
   });
   pane.element.appendChild(zone);
 
+  // ── Library select ────────────────────────────────────────────────────────
+  let libRow = null;
+  if (libraryTracks.length > 0) {
+    libRow = document.createElement('div');
+    libRow.style.cssText = 'margin: 2px 4px;';
+    const libSelect = document.createElement('select');
+    libSelect.style.cssText = `
+      width: 100%; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 2px; color: rgba(255,255,255,0.7); font-size: 10px; font-family: inherit;
+      padding: 4px 6px; outline: none; cursor: pointer; box-sizing: border-box;
+    `;
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '— Library —';
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    libSelect.appendChild(placeholder);
+    for (const filename of libraryTracks) {
+      const opt = document.createElement('option');
+      opt.value = import.meta.env.BASE_URL + filename;
+      opt.textContent = filename.replace(/\.mp3$/i, '').replace(/_/g, ' ');
+      libSelect.appendChild(opt);
+    }
+    libSelect.addEventListener('change', () => {
+      const url = libSelect.value;
+      libSelect.value = '';
+      if (url) runAsync(() => Promise.resolve(Audio.connectUrl(url)));
+    });
+    libRow.appendChild(libSelect);
+    pane.element.appendChild(libRow);
+  }
+
   // ── URL input ─────────────────────────────────────────────────────────────
   const urlRow = document.createElement('div');
   urlRow.style.cssText = 'display:flex; gap:4px; margin: 2px 4px 4px;';
@@ -511,10 +544,12 @@ function initAudioPane(container, uiState = {}) {
     if (st === 'file' || st === 'file-paused') {
       zone.style.display    = 'none';
       urlRow.style.display  = 'none';
+      if (libRow) libRow.style.display = 'none';
       controls.style.display = 'flex';
     } else {
       zone.style.display    = '';
       urlRow.style.display  = '';
+      if (libRow) libRow.style.display = '';
       controls.style.display = 'none';
       if (st === 'none') zone.textContent = '↓ Drop audio file or click to browse';
       else zone.textContent = label;

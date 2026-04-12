@@ -34,3 +34,14 @@ A separate module (loaded from `index.html`) that provides a chainable effect sy
 - Layers are tracked as JS objects with a `params` object (bound to Tweakpane) and a `render()` function that rebuilds the Hydra chain from current param values.
 - Hydra renders continuously via its internal `requestAnimationFrame` loop; no manual render loop needed.
 - There are no tests in this project.
+
+
+### Documentation for Hydra
+
+- https://hydra.ojack.xyz/api/
+
+
+### Hydra source code repo
+
+- https://github.com/hydra-synth/hydra
+
