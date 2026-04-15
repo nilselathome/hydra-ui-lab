@@ -160,4 +160,64 @@ export const TRANSFORM_TYPES = {
     ],
     build: (node, p) => node.scroll(p.scrollX, p.scrollY),
   },
+
+  // ── Filters ───────────────────────────────────────────────────────────────
+  brightness: {
+    label: 'Brightness',
+    params: [{ key: 'amount', label: 'Amount', min: -1, max: 2, step: 0.01, default: 0.4 }],
+    build: (node, p) => node.brightness(p.amount),
+  },
+  contrast: {
+    label: 'Contrast',
+    params: [{ key: 'amount', label: 'Amount', min: 0, max: 4, step: 0.01, default: 1 }],
+    build: (node, p) => node.contrast(p.amount),
+  },
+  saturate: {
+    label: 'Saturate',
+    params: [{ key: 'amount', label: 'Amount', min: 0, max: 4, step: 0.01, default: 2 }],
+    build: (node, p) => node.saturate(p.amount),
+  },
+  hue: {
+    label: 'Hue',
+    params: [{ key: 'hueRotate', label: 'Rotate', min: -1, max: 1, step: 0.01, default: 0 }],
+    build: (node, p) => node.hue(p.hueRotate),
+  },
+  color: {
+    label: 'Color',
+    params: [
+      { key: 'r', label: 'R', min: 0, max: 2, step: 0.01, default: 1 },
+      { key: 'g', label: 'G', min: 0, max: 2, step: 0.01, default: 1 },
+      { key: 'b', label: 'B', min: 0, max: 2, step: 0.01, default: 1 },
+    ],
+    build: (node, p) => node.color(p.r, p.g, p.b),
+  },
+  invert: {
+    label: 'Invert',
+    params: [{ key: 'amount', label: 'Amount', min: 0, max: 1, step: 0.01, default: 1 }],
+    build: (node, p) => node.invert(p.amount),
+  },
+  luma: {
+    label: 'Luma Key',
+    params: [
+      { key: 'threshold', label: 'Threshold', min: 0, max: 1, step: 0.01, default: 0.5 },
+      { key: 'tolerance', label: 'Tolerance', min: 0, max: 1, step: 0.01, default: 0.1 },
+    ],
+    build: (node, p) => node.luma(p.threshold, p.tolerance),
+  },
+  thresh: {
+    label: 'Threshold',
+    params: [
+      { key: 'threshold', label: 'Threshold', min: 0, max: 1, step: 0.01, default: 0.5 },
+      { key: 'tolerance', label: 'Tolerance', min: 0, max: 1, step: 0.01, default: 0.04 },
+    ],
+    build: (node, p) => node.thresh(p.threshold, p.tolerance),
+  },
+  posterize: {
+    label: 'Posterize',
+    params: [
+      { key: 'bins',  label: 'Bins',  min: 1, max: 20, step: 1,    default: 3 },
+      { key: 'gamma', label: 'Gamma', min: 0, max: 4,  step: 0.01, default: 0.6 },
+    ],
+    build: (node, p) => node.posterize(p.bins, p.gamma),
+  },
 };
