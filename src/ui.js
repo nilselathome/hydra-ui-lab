@@ -627,13 +627,16 @@ function addImageDropZone(folder, layer) {
 
   // Preset image select
   const PRESET_IMAGES = [
-    'IMG_0162.png',
-    'IMG_0551.gif',
-    'IMG_0672.png',
-    'IMG_0685.gif',
-    'IMG_0762.png',
-    'IMG_1240.JPG',
-    'IMG_3810.png',
+    'IMG_0160.jpg',
+    'IMG_0162.jpg',
+    'IMG_0672.jpg',
+    'IMG_0762.jpg',
+    'IMG_1240.jpg',
+    'IMG_2472.jpg',
+    'IMG_2601.jpg',
+    'IMG_2633.jpg',
+    'IMG_3810.jpg',
+    'IMG_4697.jpg',
   ];
   const presetSelect = document.createElement('select');
   presetSelect.style.cssText = `
