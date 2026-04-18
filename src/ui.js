@@ -637,6 +637,14 @@ function addImageDropZone(folder, layer) {
     'IMG_2633.jpg',
     'IMG_3810.jpg',
     'IMG_4697.jpg',
+    'procreate_fvr-01.png',
+    'procreate_fvr-02.png',
+    'procreate_fvr-03.png',
+    'procreate_la-01.jpg',
+    'procreate-g3_1.webp',
+    'procreate-g3_2.webp',
+    'procreate-g3_3.webp',
+    'procreate-g3_4.webp',
   ];
   const presetSelect = document.createElement('select');
   presetSelect.style.cssText = `
