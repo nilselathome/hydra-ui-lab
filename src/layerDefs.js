@@ -93,6 +93,17 @@ export const LAYER_TYPES = {
     params: [],
     build: () => src(o0),
   },
+
+  glsl: {
+    label: 'GLSL',
+    shortLabel: 'GLSL',
+    icon: 'ph-code',
+    params: [],
+    build: (p, layer) => {
+      const fn = window[layer._glslName];
+      return fn ? fn() : solid(0, 0, 0);
+    },
+  },
 };
 
 // Keys must match Hydra method names (used directly as node[blendMode](src, amount))

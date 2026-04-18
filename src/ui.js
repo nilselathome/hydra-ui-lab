@@ -1,6 +1,6 @@
 import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
 import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
-import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, applyState } from './layers.js';
+import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, applyState, registerGlsl } from './layers.js';
 import { render } from './engine.js';
 import { saveToUrl, saveSceneToUrl, showWarning, encodeState, deserializeLayers } from './state.js';
 import { storeImage } from './imageStore.js';
@@ -437,7 +437,7 @@ function initAudioPane(container, uiState = {}) {
       if (!url) return;
       audioLibraryTrack = filename;
       save();
-      runAsync(() => Promise.resolve(Audio.connectUrl(url)));
+      runAsync(() => Audio.connectUrl(url));
     });
     libRow.appendChild(libSelect);
     pane.element.appendChild(libRow);
@@ -465,7 +465,7 @@ function initAudioPane(container, uiState = {}) {
     const url = urlInput.value.trim();
     if (!url) return;
     clearLibraryTrack();
-    runAsync(() => Promise.resolve(Audio.connectUrl(url)));
+    runAsync(() => Audio.connectUrl(url));
   };
   urlLoadBtn.addEventListener('click', applyAudioUrl);
   urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyAudioUrl(); });
@@ -599,7 +599,7 @@ function initAudioPane(container, uiState = {}) {
   if (uiState.audioTrack && libraryTracks.includes(uiState.audioTrack)) {
     audioLibraryTrack = uiState.audioTrack;
     const url = import.meta.env.BASE_URL + uiState.audioTrack;
-    runAsync(() => Promise.resolve(Audio.connectUrl(url)));
+    runAsync(() => Audio.connectUrl(url));
   }
 }
 
@@ -805,6 +805,46 @@ function addTextControls(folder, layer) {
   content.appendChild(fontRow);
 }
 
+// ── GLSL code editor ─────────────────────────────────────────────────────────
+function addGlslEditor(folder, layer) {
+  const content = folder.element.querySelector('.tp-fldv_c') ?? folder.element;
+
+  const textarea = document.createElement('textarea');
+  textarea.value     = layer._glslCode ?? '';
+  textarea.spellcheck = false;
+  textarea.style.cssText = `
+    display: block; width: calc(100% - 8px); margin: 4px 4px 2px;
+    min-height: 150px; resize: vertical;
+    background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 2px; color: rgba(255,255,255,0.85);
+    font-size: 10px; font-family: 'Roboto Mono', 'Source Code Pro', monospace;
+    line-height: 1.55; padding: 6px; outline: none;
+    tab-size: 2; box-sizing: border-box;
+  `;
+
+  // Tab key inserts two spaces instead of leaving the field
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    const s = textarea.selectionStart, end = textarea.selectionEnd;
+    textarea.value = textarea.value.slice(0, s) + '  ' + textarea.value.slice(end);
+    textarea.selectionStart = textarea.selectionEnd = s + 2;
+  });
+
+  let debounce = null;
+  textarea.addEventListener('input', () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      layer._glslCode = textarea.value;
+      registerGlsl(layer);
+      render(getLayers());
+      save();
+    }, 400);
+  });
+
+  content.appendChild(textarea);
+}
+
 // ── Bezier curve editor ───────────────────────────────────────────────────────
 // Injects a small canvas + preset buttons into a Tweakpane folder element.
 // `anim`     — the animate object whose `bezier` array ([x1,y1,x2,y2]) is mutated
@@ -999,6 +1039,7 @@ function buildLayersUI() {
     // Type-specific media controls
     if (layer.type === 'img')  addImageDropZone(f, layer);
     if (layer.type === 'text') addTextControls(f, layer);
+    if (layer.type === 'glsl') addGlslEditor(f, layer);
 
     // Type-specific params
     LAYER_TYPES[layer.type].params.forEach(p => {

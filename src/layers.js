@@ -1,6 +1,35 @@
 import { LAYER_TYPES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
 import { getImage } from './imageStore.js';
 
+// ── GLSL helpers ──────────────────────────────────────────────────────────────
+
+const DEFAULT_GLSL = `void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+  vec2 uv = fragCoord / iResolution.xy;
+  vec3 col = 0.5 + 0.5 * cos(iTime + uv.xyx + vec3(0.0, 2.0, 4.0));
+  fragColor = vec4(col, 1.0);
+}`;
+
+function transpileGlsl(code, fnName) {
+  // Rename mainImage to a per-layer unique name to avoid conflicts between GLSL layers
+  const helperName = `_mi_${fnName}`;
+  let glsl = code
+    .replace(/\biTime\b/g,       'time')
+    .replace(/\biResolution\b/g, 'resolution')
+    .replace(/\biMouse\b/g,      'mouse')
+    .replace(/\bmainImage\b/g,   helperName);
+  glsl += `\nvec4 ${fnName}(vec2 _st){\n  vec4 col=vec4(0.0);\n  ${helperName}(col,_st*resolution);\n  return col;\n}`;
+  return glsl;
+}
+
+export function registerGlsl(layer) {
+  try {
+    const glsl = transpileGlsl(layer._glslCode, layer._glslName);
+    setFunction({ name: layer._glslName, type: 'src', inputs: [], glsl });
+  } catch (e) {
+    console.warn('GLSL registration error:', e);
+  }
+}
+
 let layers = [];
 let nextId = 1;
 
@@ -203,6 +232,12 @@ export function addLayer(type, overrides = {}) {
     }
   }
 
+  if (type === 'glsl') {
+    layer._glslName = `hydraGlsl_${layer.id}`;
+    layer._glslCode = DEFAULT_GLSL;
+    registerGlsl(layer);
+  }
+
   if (type === 'text') {
     const slot = allocateSlot();
     layer._hydraSlot = slot;
@@ -260,6 +295,11 @@ export function applyState(dataArray) {
       layer.textContent = data.textContent ?? 'Text';
       layer.fontFamily  = data.fontFamily  ?? 'Bebas Neue';
       drawTextCanvas(layer);
+    }
+    if (data.type === 'glsl') {
+      layer._glslName = `hydraGlsl_${layer.id}`;
+      layer._glslCode = data.glslCode ?? DEFAULT_GLSL;
+      registerGlsl(layer);
     }
   });
 }

@@ -38,6 +38,7 @@ function serializeLayer(layer) {
   if (layer.type === 'img')  { out.imgUrl = layer.imgUrl || ''; out.imgName = layer.imgName || ''; }
   if (layer.type === 'text') out.textContent = layer.textContent ?? '';
   if (layer.type === 'text') out.fontFamily  = layer.fontFamily  ?? 'Arial';
+  if (layer.type === 'glsl') out.glslCode    = layer._glslCode   ?? '';
   return out;
 }
 

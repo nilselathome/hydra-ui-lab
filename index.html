@@ -21,49 +21,53 @@
       overflow-y: auto;
       /* Tweakpane renders inside here */
     }
-
-    #autoplay-overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.5);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #fff;
-      font-size: 1.25rem;
-      font-family: sans-serif;
-      letter-spacing: 0.05em;
-      z-index: 99999;
-      cursor: pointer;
-      opacity: 1;
-      transition: opacity 0.5s ease;
-    }
-    #autoplay-overlay.fade-out {
-      opacity: 0;
-      pointer-events: none;
-    }
   </style>
 </head>
 <body>
   <canvas id="hydraCanvas"></canvas>
   <div id="ui"></div>
-  <div id="autoplay-overlay"><span>Press any key to play</span></div>
 
   <script src="https://cdn.jsdelivr.net/npm/hydra-synth@1.3.29/dist/hydra-synth.min.js"></script>
   <script type="module" src="/src/app.js"></script>
   <script type="module">
-    import { playFile } from '/src/audio.js';
+    import { playFile, connectUrl } from '/src/audio.js';
     import { loadFromUrl } from '/src/state.js';
 
-    const overlay = document.getElementById('autoplay-overlay');
     const savedState = loadFromUrl();
 
-    if (!savedState?.ui?.audioTrack) {
-      overlay.remove();
-    } else {
+    async function initAudioOverlay() {
+      if (!savedState?.ui?.audioTrack) {
+        return;
+      }
+
+      // Try to autoplay the audio track
+      const url = import.meta.env.BASE_URL + savedState.ui.audioTrack;
+      const autoplaySucceeded = await connectUrl(url);
+
+      if (autoplaySucceeded) {
+        // Autoplay worked, no overlay needed
+        return;
+      }
+
+      // Autoplay was blocked, create and show overlay
+      const overlay = document.createElement('div');
+      overlay.id = 'autoplay-overlay';
+      overlay.innerHTML = '<span>Press any key to play</span>';
+      overlay.style.cssText = `
+        position: fixed; inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex; align-items: center; justify-content: center;
+        color: #fff; font-size: 1.25rem; font-family: sans-serif;
+        letter-spacing: 0.05em;
+        z-index: 99999; cursor: pointer;
+        opacity: 1; transition: opacity 0.5s ease;
+      `;
+      document.body.appendChild(overlay);
+
       function dismiss() {
         playFile();
-        overlay.classList.add('fade-out');
+        overlay.style.opacity = '0';
+        overlay.style.pointerEvents = 'none';
         overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
         document.removeEventListener('keydown', dismiss);
         document.removeEventListener('click', dismiss);
@@ -72,6 +76,8 @@
       document.addEventListener('keydown', dismiss);
       document.addEventListener('click', dismiss);
     }
+
+    initAudioOverlay();
   </script>
 </body>
 </html>

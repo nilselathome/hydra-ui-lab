@@ -129,7 +129,7 @@ export async function connectTab() {
   notifyPlayback();
 }
 
-export function connectUrl(url) {
+export async function connectUrl(url) {
   teardownAnalyser();
   teardownStream();
   teardownFile();
@@ -156,12 +156,19 @@ export function connectUrl(url) {
     notifyPlayback();
   });
 
-  el.play().catch(() => {}); // autoplay may be blocked; user can press play
+  let autoplaySucceeded = false;
+  try {
+    await el.play();
+    autoplaySucceeded = true;
+  } catch {
+    // autoplay was blocked; user can press play
+  }
   notify('file', currentFile.name);
   notifyPlayback();
+  return autoplaySucceeded;
 }
 
-export function connectFile(file) {
+export async function connectFile(file) {
   teardownAnalyser();
   teardownStream();
   teardownFile();
@@ -188,9 +195,16 @@ export function connectFile(file) {
     notifyPlayback();
   });
 
-  el.play();
+  let autoplaySucceeded = false;
+  try {
+    await el.play();
+    autoplaySucceeded = true;
+  } catch {
+    // autoplay was blocked; user can press play
+  }
   notify('file', file.name);
   notifyPlayback();
+  return autoplaySucceeded;
 }
 
 // Pause file playback but keep everything loaded
