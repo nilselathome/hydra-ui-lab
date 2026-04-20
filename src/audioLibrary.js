@@ -1,6 +1,6 @@
 // List of mp3 files in public/. Add filenames here when you drop in new tracks.
 // Full https URLs are also supported for remote files.
-const GAUS = 'https://gaus.spektrailstein.no/hydraui-audiolib/';
+const GAUS = 'https://gaus.spektralstein.no/hydraui-audiolib/';
 export const tracks = [
   'solarmotel_clip-test.mp3',
   GAUS + '2019-05-03_20h57m50.mp3',
