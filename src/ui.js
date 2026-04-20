@@ -426,8 +426,8 @@ function initAudioPane(container, uiState = {}) {
     libSelect.appendChild(placeholder);
     for (const filename of libraryTracks) {
       const opt = document.createElement('option');
-      opt.value = import.meta.env.BASE_URL + filename;
-      opt.textContent = filename.replace(/\.mp3$/i, '').replace(/_/g, ' ');
+      opt.value = filename.startsWith('http') ? filename : import.meta.env.BASE_URL + filename;
+      opt.textContent = filename.replace(/^.*\//, '').replace(/\.mp3$/i, '').replace(/_/g, ' ');
       libSelect.appendChild(opt);
     }
     libSelect.addEventListener('change', () => {
@@ -598,7 +598,7 @@ function initAudioPane(container, uiState = {}) {
   // ── Auto-connect library track from saved state ───────────────────────────
   if (uiState.audioTrack && libraryTracks.includes(uiState.audioTrack)) {
     audioLibraryTrack = uiState.audioTrack;
-    const url = import.meta.env.BASE_URL + uiState.audioTrack;
+    const url = uiState.audioTrack.startsWith('http') ? uiState.audioTrack : import.meta.env.BASE_URL + uiState.audioTrack;
     runAsync(() => Audio.connectUrl(url));
   }
 }
