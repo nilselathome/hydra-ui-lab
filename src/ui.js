@@ -655,8 +655,34 @@ function initAudioPane(container, uiState = {}) {
   if (uiState.audioTrack && libraryTracks.includes(uiState.audioTrack)) {
     audioLibraryTrack = uiState.audioTrack;
     const url = /^https?:\/\//.test(uiState.audioTrack) ? uiState.audioTrack : import.meta.env.BASE_URL + uiState.audioTrack;
-    runAsync(() => Audio.connectUrl(url));
+    (async () => {
+      try {
+        const ok = await Audio.connectUrl(url);
+        if (!ok) showAutoplayOverlay();
+      } catch (e) {
+        showWarning(e.message ?? 'Audio error');
+      }
+    })();
   }
+}
+
+function showAutoplayOverlay() {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = `
+    position: fixed; inset: 0; z-index: 9999;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    background: rgba(0,0,0,0.8);
+  `;
+  const label = document.createElement('div');
+  label.style.cssText = `
+    font-family: monospace; font-size: 13px; color: rgba(255,255,255,0.65);
+    letter-spacing: 0.06em; pointer-events: none;
+  `;
+  label.textContent = '▶  click to play audio';
+  overlay.appendChild(label);
+  overlay.addEventListener('click', () => { Audio.playFile(); overlay.remove(); });
+  document.body.appendChild(overlay);
 }
 
 function addImageDropZone(folder, layer) {
