@@ -1187,7 +1187,7 @@ function buildLayersUI() {
     );
 
     layer.mods.forEach((mod, modIdx) => {
-      const modFolder = f.addFolder({ title: `Mod ${modIdx + 1}`, expanded: mod._expanded });
+      const modFolder = f.addFolder({ title: `Mod ${modIdx + 1}: ${MOD_FNS[mod.fn]?.label ?? mod.fn}`, expanded: mod._expanded });
       modFolder.on('fold', (ev) => { mod._expanded = ev.expanded; save(); });
 
       modFolder.addBinding(mod, 'enabled', { label: 'Enable' }).on('change', onChange);

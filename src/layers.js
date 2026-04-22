@@ -9,21 +9,38 @@ const DEFAULT_GLSL = `void mainImage(out vec4 fragColor, in vec2 fragCoord) {
   fragColor = vec4(col, 1.0);
 }`;
 
-function transpileGlsl(code, fnName) {
-  // Rename mainImage to a per-layer unique name to avoid conflicts between GLSL layers
-  const helperName = `_mi_${fnName}`;
-  let glsl = code
+// Hydra's setFunction expects the GLSL *body* of `vec4 fnName(vec2 _st) { ... }`,
+// not a full function definition. We extract the mainImage body and emit Shadertoy-
+// compatible preamble variables so user code can use fragCoord/fragColor naturally.
+function transpileGlsl(code) {
+  const transformed = code
     .replace(/\biTime\b/g,       'time')
     .replace(/\biResolution\b/g, 'resolution')
-    .replace(/\biMouse\b/g,      'mouse')
-    .replace(/\bmainImage\b/g,   helperName);
-  glsl += `\nvec4 ${fnName}(vec2 _st){\n  vec4 col=vec4(0.0);\n  ${helperName}(col,_st*resolution);\n  return col;\n}`;
-  return glsl;
+    .replace(/\biMouse\b/g,      'mouse');
+
+  // Find the mainImage function and extract its body via brace matching
+  const sigIdx = transformed.search(/void\s+mainImage\s*\(/);
+  if (sigIdx !== -1) {
+    const braceStart = transformed.indexOf('{', sigIdx);
+    if (braceStart !== -1) {
+      let depth = 1, i = braceStart + 1;
+      while (i < transformed.length && depth > 0) {
+        if (transformed[i] === '{') depth++;
+        else if (transformed[i] === '}') depth--;
+        i++;
+      }
+      const body = transformed.slice(braceStart + 1, i - 1);
+      return `vec2 fragCoord=_st*resolution;\nvec4 fragColor=vec4(0.0);\n${body}\nreturn fragColor;`;
+    }
+  }
+
+  // Fallback: treat as a raw Hydra function body (already has return statement)
+  return transformed;
 }
 
 export function registerGlsl(layer) {
   try {
-    const glsl = transpileGlsl(layer._glslCode, layer._glslName);
+    const glsl = transpileGlsl(layer._glslCode);
     setFunction({ name: layer._glslName, type: 'src', inputs: [], glsl });
   } catch (e) {
     console.warn('GLSL registration error:', e);
