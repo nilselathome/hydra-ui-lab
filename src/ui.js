@@ -2,7 +2,7 @@ import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpan
 import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
 import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, applyState, registerGlsl } from './layers.js';
 import { render } from './engine.js';
-import { saveToUrl, saveSceneToUrl, showWarning, encodeState, deserializeLayers } from './state.js';
+import { saveToUrl, saveSceneToUrl, showWarning, encodeState, deserializeLayers, getCompressedUrlLength } from './state.js';
 import { storeImage } from './imageStore.js';
 import * as Audio from './audio.js';
 import { tracks as libraryTracks } from './audioLibrary.js';
@@ -23,6 +23,19 @@ let layersPaneExpanded = true;
 let scenesPaneExpanded = true;
 let audioLibraryTrack  = null; // filename of active library track, or null
 
+function refreshUrlGauge() {
+  if (!_urlGaugeFill) return;
+  clearTimeout(_urlGaugeTimer);
+  _urlGaugeTimer = setTimeout(async () => {
+    const len = await getCompressedUrlLength(getLayers(), {});
+    const pct = Math.min(len / URL_GAUGE_MAX * 100, 100);
+    _urlGaugeFill.style.width = pct + '%';
+    _urlGaugeFill.style.background =
+      pct > 80 ? '#e05050' : pct > 55 ? '#d08030' : '#40a878';
+    _urlGaugeLabel.textContent = `${len} / ${URL_GAUGE_MAX}`;
+  }, 250);
+}
+
 function save() {
   const encoded = getLayersEncoded();
   const isSaved = activeSlot !== null && _cleanEncoded !== null && encoded === _cleanEncoded;
@@ -32,6 +45,7 @@ function save() {
     saveToUrl(getLayers(), { addPane: addPaneExpanded, audioPane: audioPaneExpanded, layersPane: layersPaneExpanded, scenesPane: scenesPaneExpanded, audioTrack: audioLibraryTrack });
   }
   refreshSaveBtn();
+  refreshUrlGauge();
 }
 
 function refreshSaveBtn() {
@@ -58,6 +72,10 @@ let _clearSceneBtn = null;
 let _pasteSceneBtn = null;
 let _clipboard     = null;
 let _cleanEncoded  = null; // encoded state at last load/save — used to detect unsaved changes
+let _urlGaugeFill  = null;
+let _urlGaugeLabel = null;
+let _urlGaugeTimer = null;
+const URL_GAUGE_MAX = 8000;
 
 function getLayersEncoded() {
   // Store layer data only (no UI pane state) so comparisons aren't thrown off by fold changes
@@ -316,6 +334,44 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   content.appendChild(btnRow1);
   content.appendChild(btnRow2);
   refreshSceneButtons(); // set initial labels
+
+  // URL size gauge
+  const gaugeWrap = document.createElement('div');
+  gaugeWrap.style.cssText = 'padding:4px 6px 7px;';
+
+  const gaugeHeader = document.createElement('div');
+  gaugeHeader.style.cssText = 'display:flex;justify-content:space-between;margin-bottom:3px';
+
+  const gaugeTitle = document.createElement('span');
+  gaugeTitle.textContent = 'url size';
+  gaugeTitle.style.cssText = 'font-size:8px;font-family:monospace;color:rgba(255,255,255,0.2)';
+
+  _urlGaugeLabel = document.createElement('span');
+  _urlGaugeLabel.textContent = '—';
+  _urlGaugeLabel.style.cssText = 'font-size:8px;font-family:monospace;color:rgba(255,255,255,0.35)';
+
+  gaugeHeader.appendChild(gaugeTitle);
+  gaugeHeader.appendChild(_urlGaugeLabel);
+
+  const gaugeTrack = document.createElement('div');
+  gaugeTrack.style.cssText = `
+    width:100%; height:4px; border-radius:2px;
+    background:rgba(255,255,255,0.07);
+    position:relative; overflow:hidden;
+  `;
+  _urlGaugeFill = document.createElement('div');
+  _urlGaugeFill.style.cssText = `
+    position:absolute; top:0; left:0; bottom:0;
+    width:0%; background:#40a878; border-radius:2px;
+    transition:width 0.35s ease, background 0.35s ease;
+  `;
+  gaugeTrack.appendChild(_urlGaugeFill);
+
+  gaugeWrap.appendChild(gaugeHeader);
+  gaugeWrap.appendChild(gaugeTrack);
+  content.appendChild(gaugeWrap);
+
+  refreshUrlGauge();
 }
 
 export function initUI(container, uiState = {}, initialSceneSlot = null) {

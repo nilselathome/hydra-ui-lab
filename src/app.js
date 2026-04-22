@@ -12,8 +12,8 @@ canvas.height = window.innerHeight * dpr;
 new Hydra({ canvas, detectAudio: false, makeGlobal: true });
 
 // Hydra needs a tick before the GL context is ready to accept chains
-setTimeout(() => {
-  const savedData = loadFromUrl();
+setTimeout(async () => {
+  const savedData = await loadFromUrl();
   if (savedData) applyState(deserializeLayers(savedData.layers ?? savedData));
 
   initUI(document.getElementById('ui'), savedData?.ui ?? {}, savedData?.sceneSlot ?? null);

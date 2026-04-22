@@ -1,7 +1,5 @@
 import { TRANSFORM_TYPES, MOD_FNS } from './layerDefs.js';
 
-const URL_LENGTH_LIMIT = 8000;
-
 // ── Serialization ─────────────────────────────────────────────────────────────
 
 function serializeTransform(t) {
@@ -97,29 +95,61 @@ export function deserializeLayers(dataArray) {
 
 const SCENE_KEY = (n) => `hydra-scene-${n}`;
 
+// Synchronous legacy encode — kept for dirty-check comparisons and localStorage scene slots
 export function encodeState(layers, uiState = {}) {
   const payload = { layers: layers.map(serializeLayer), ui: uiState };
   return btoa(encodeURIComponent(JSON.stringify(payload)));
 }
 
-export function saveToUrl(layers, uiState = {}) {
-  const encoded = encodeState(layers, uiState);
-  const hash    = `#s=${encoded}`;
-  const fullUrl = location.origin + location.pathname + hash;
+// Async gzip + URL-safe base64 (no percent-encoding overhead)
+async function compressPayload(payload) {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  const cs = new CompressionStream('gzip');
+  const writer = cs.writable.getWriter();
+  writer.write(bytes);
+  writer.close();
+  const buf = await new Response(cs.readable).arrayBuffer();
+  const u8 = new Uint8Array(buf);
+  let binary = '';
+  for (let i = 0; i < u8.length; i++) binary += String.fromCharCode(u8[i]);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
 
-  if (fullUrl.length > URL_LENGTH_LIMIT) {
-    showWarning(`URL too long to share (${fullUrl.length} chars). Shorten image URLs or reduce layer count.`);
-    return;
+async function decompressPayload(encoded) {
+  const b64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+  const binary = atob(b64);
+  const u8 = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) u8[i] = binary.charCodeAt(i);
+  const ds = new DecompressionStream('gzip');
+  const writer = ds.writable.getWriter();
+  writer.write(u8);
+  writer.close();
+  const buf = await new Response(ds.readable).arrayBuffer();
+  return JSON.parse(new TextDecoder().decode(buf));
+}
+
+export async function getCompressedUrlLength(layers, uiState = {}) {
+  const payload = { layers: layers.map(serializeLayer), ui: uiState };
+  const encoded = await compressPayload(payload);
+  return encoded.length;
+}
+
+export async function saveToUrl(layers, uiState = {}) {
+  const payload = { layers: layers.map(serializeLayer), ui: uiState };
+  try {
+    const encoded = await compressPayload(payload);
+    history.replaceState(null, '', location.pathname + `#z=${encoded}`);
+  } catch (e) {
+    showWarning('Failed to save state to URL.');
+    console.error(e);
   }
-
-  history.replaceState(null, '', location.pathname + hash);
 }
 
 export function saveSceneToUrl(slot) {
   history.replaceState(null, '', location.pathname + `#scene=${slot + 1}`);
 }
 
-export function loadFromUrl() {
+export async function loadFromUrl() {
   // Short scene URL: #scene=N (1-based)
   const sceneMatch = location.hash.match(/^#scene=(\d+)$/);
   if (sceneMatch) {
@@ -135,12 +165,23 @@ export function loadFromUrl() {
     }
   }
 
-  // Full encoded state: #s=...
-  const match = location.hash.match(/^#s=(.+)$/);
-  if (!match) return null;
+  // Compressed state: #z=...
+  const zMatch = location.hash.match(/^#z=(.+)$/);
+  if (zMatch) {
+    try {
+      const payload = await decompressPayload(zMatch[1]);
+      if (Array.isArray(payload)) return { layers: payload, ui: {} };
+      return payload;
+    } catch {
+      return null;
+    }
+  }
+
+  // Legacy full encoded state: #s=...
+  const sMatch = location.hash.match(/^#s=(.+)$/);
+  if (!sMatch) return null;
   try {
-    const payload = JSON.parse(decodeURIComponent(atob(match[1])));
-    // Support old format (bare array) and new format ({ layers, ui })
+    const payload = JSON.parse(decodeURIComponent(atob(sMatch[1])));
     if (Array.isArray(payload)) return { layers: payload, ui: {} };
     return payload;
   } catch {
