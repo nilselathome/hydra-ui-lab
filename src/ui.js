@@ -1,6 +1,6 @@
 import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
 import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
-import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, applyState, registerGlsl } from './layers.js';
+import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, applyState, registerGlsl, reloadThree } from './layers.js';
 import { render } from './engine.js';
 import { saveToUrl, saveSceneToUrl, showWarning, encodeState, deserializeLayers, getCompressedUrlLength } from './state.js';
 import { storeImage } from './imageStore.js';
@@ -895,6 +895,44 @@ function addTextControls(folder, layer) {
   content.appendChild(fontRow);
 }
 
+// ── Three.js code editor ──────────────────────────────────────────────────────
+function addThreeEditor(folder, layer) {
+  const content = folder.element.querySelector('.tp-fldv_c') ?? folder.element;
+
+  const textarea = document.createElement('textarea');
+  textarea.value      = layer._threeCode ?? '';
+  textarea.spellcheck = false;
+  textarea.style.cssText = `
+    display: block; width: calc(100% - 8px); margin: 4px 4px 2px;
+    min-height: 150px; resize: vertical;
+    background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 2px; color: rgba(255,255,255,0.85);
+    font-size: 10px; font-family: 'Roboto Mono', 'Source Code Pro', monospace;
+    line-height: 1.55; padding: 6px; outline: none;
+    tab-size: 2; box-sizing: border-box;
+  `;
+
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    const s = textarea.selectionStart, end = textarea.selectionEnd;
+    textarea.value = textarea.value.slice(0, s) + '  ' + textarea.value.slice(end);
+    textarea.selectionStart = textarea.selectionEnd = s + 2;
+  });
+
+  let debounce = null;
+  textarea.addEventListener('input', () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      layer._threeCode = textarea.value;
+      reloadThree(layer);
+      save();
+    }, 600);
+  });
+
+  content.appendChild(textarea);
+}
+
 // ── GLSL code editor ─────────────────────────────────────────────────────────
 function addGlslEditor(folder, layer) {
   const content = folder.element.querySelector('.tp-fldv_c') ?? folder.element;
@@ -1127,9 +1165,10 @@ function buildLayersUI() {
     }
 
     // Type-specific media controls
-    if (layer.type === 'img')  addImageDropZone(f, layer);
-    if (layer.type === 'text') addTextControls(f, layer);
-    if (layer.type === 'glsl') addGlslEditor(f, layer);
+    if (layer.type === 'img')   addImageDropZone(f, layer);
+    if (layer.type === 'text')  addTextControls(f, layer);
+    if (layer.type === 'glsl')  addGlslEditor(f, layer);
+    if (layer.type === 'three') addThreeEditor(f, layer);
 
     // Type-specific params
     LAYER_TYPES[layer.type].params.forEach(p => {

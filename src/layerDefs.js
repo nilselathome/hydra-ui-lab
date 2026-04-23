@@ -104,6 +104,14 @@ export const LAYER_TYPES = {
       return fn ? fn() : solid(0, 0, 0);
     },
   },
+
+  three: {
+    label: 'Three.js',
+    shortLabel: '3D',
+    icon: 'ph-cube',
+    params: [],
+    build: (p, layer) => layer._hydraSource ? src(layer._hydraSource) : solid(0, 0, 0),
+  },
 };
 
 // Keys must match Hydra method names (used directly as node[blendMode](src, amount))

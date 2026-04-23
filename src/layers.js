@@ -1,6 +1,100 @@
 import { LAYER_TYPES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
 import { getImage } from './imageStore.js';
 
+// ── Three.js helpers ──────────────────────────────────────────────────────────
+
+const DEFAULT_THREE_CODE = `const geo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+const mat = new THREE.MeshPhongMaterial({
+  color: 0x88ccff,
+  shininess: 120,
+  transparent: true,
+  opacity: 0.45,
+  side: THREE.DoubleSide,
+});
+const cube = new THREE.Mesh(geo, mat);
+scene.add(cube);
+
+const light = new THREE.DirectionalLight(0xffffff, 1.2);
+light.position.set(1, 2, 2);
+scene.add(light);
+scene.add(new THREE.AmbientLight(0x222244, 1));
+
+function update(t) {
+  cube.rotation.x = t * 0.5;
+  cube.rotation.y = t * 0.7;
+}`;
+
+function evalThreeCode(layer) {
+  const scene = layer._threeScene;
+  if (!scene) return;
+
+  // Clear existing scene objects
+  const toRemove = [...scene.children];
+  toRemove.forEach(obj => {
+    scene.remove(obj);
+    obj.geometry?.dispose();
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    mats.forEach(m => m?.dispose());
+  });
+
+  layer._threeUpdate = null;
+  try {
+    // User code runs with THREE and scene in scope; can define update(t) which gets returned
+    const fn = new Function('THREE', 'scene', `${layer._threeCode}\nreturn typeof update === 'function' ? update : null;`);
+    layer._threeUpdate = fn(window.THREE, scene);
+  } catch (e) {
+    console.warn('Three.js code error:', e);
+  }
+}
+
+function createThreeLayer(layer) {
+  if (!window.THREE) { console.warn('Three.js not loaded'); return; }
+
+  const slot = allocateSlot();
+  layer._hydraSlot   = slot;
+  layer._hydraSource = slot !== null ? window[`s${slot}`] : null;
+  if (!layer._hydraSource) return;
+
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+
+  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+  renderer.setSize(w, h);
+  renderer.setClearColor(0x000000, 0);
+
+  const scene  = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 100);
+  camera.position.z = 3;
+
+  layer._threeRenderer = renderer;
+  layer._threeScene    = scene;
+  layer._threeCamera   = camera;
+  layer._threeUpdate   = null;
+  layer._threeRafId    = null;
+
+  evalThreeCode(layer);
+
+  layer._hydraSource.init({ src: renderer.domElement, dynamic: true });
+
+  const startTime = performance.now();
+  function tick() {
+    const t = (performance.now() - startTime) / 1000;
+    if (layer._threeUpdate) layer._threeUpdate(t);
+    renderer.render(scene, camera);
+    layer._threeRafId = requestAnimationFrame(tick);
+  }
+  layer._threeRafId = requestAnimationFrame(tick);
+}
+
+function destroyThreeLayer(layer) {
+  if (layer._threeRafId) { cancelAnimationFrame(layer._threeRafId); layer._threeRafId = null; }
+  if (layer._threeRenderer) { layer._threeRenderer.dispose(); layer._threeRenderer = null; }
+}
+
+export function reloadThree(layer) {
+  evalThreeCode(layer);
+}
+
 // ── GLSL helpers ──────────────────────────────────────────────────────────────
 
 const DEFAULT_GLSL = `void mainImage(out vec4 fragColor, in vec2 fragCoord) {
@@ -255,6 +349,11 @@ export function addLayer(type, overrides = {}) {
     registerGlsl(layer);
   }
 
+  if (type === 'three') {
+    layer._threeCode = DEFAULT_THREE_CODE;
+    createThreeLayer(layer);
+  }
+
   if (type === 'text') {
     const slot = allocateSlot();
     layer._hydraSlot = slot;
@@ -277,6 +376,7 @@ export function addLayer(type, overrides = {}) {
 
 export function removeLayer(id) {
   const layer = layers.find(l => l.id === id);
+  if (layer?.type === 'three') destroyThreeLayer(layer);
   if (layer?._hydraSlot != null) freeSlot(layer._hydraSlot);
   _offsets.delete(id);
   layers = layers.filter(l => l.id !== id);
@@ -317,6 +417,10 @@ export function applyState(dataArray) {
       layer._glslName = `hydraGlsl_${layer.id}`;
       layer._glslCode = data.glslCode ?? DEFAULT_GLSL;
       registerGlsl(layer);
+    }
+    if (data.type === 'three') {
+      layer._threeCode = data.threeCode ?? DEFAULT_THREE_CODE;
+      reloadThree(layer);
     }
   });
 }
