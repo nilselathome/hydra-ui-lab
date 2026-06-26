@@ -38,6 +38,13 @@ function animatedValue(animate, min, max) {
       return min + bezierY(x1, y1, x2, y2, phase) * range;
     };
   }
+  if (animate.mode === 'steps') {
+    const vals = animate.steps?.length ? animate.steps : [min, max];
+    return () => {
+      const step = Math.floor(time * animate.speed);
+      return vals[((step % vals.length) + vals.length) % vals.length];
+    };
+  }
   return () => min + ((time * animate.speed) % range);
 }
 

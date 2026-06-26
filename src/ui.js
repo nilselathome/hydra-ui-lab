@@ -1117,6 +1117,36 @@ function buildBezierEditor(anim, folderEl, onchange) {
   draw();
 }
 
+function buildStepsEditor(anim, folderEl, onChange) {
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex; align-items:center; gap:6px; margin:2px 4px 4px;';
+
+  const label = document.createElement('span');
+  label.textContent = 'Values';
+  label.style.cssText = 'font-size:10px; font-family:inherit; color:rgba(255,255,255,0.5); flex-shrink:0; width:52px;';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = '1, 2, 4, 8';
+  input.value = (anim.steps ?? []).join(', ');
+  input.style.cssText = `
+    flex: 1; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 2px; color: #fff; font-size: 10px; font-family: inherit;
+    padding: 4px 6px; outline: none;
+  `;
+
+  const apply = () => {
+    const vals = input.value.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
+    if (vals.length > 0) { anim.steps = vals; onChange(); }
+  };
+  input.addEventListener('change', apply);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') apply(); });
+
+  row.append(label, input);
+  const content = folderEl.querySelector('.tp-fldv_c') ?? folderEl;
+  content.appendChild(row);
+}
+
 async function onChange() {
   await Promise.all(getLayers().filter(l => l.type === 'text').map(drawTextCanvas));
   render(getLayers());
@@ -1216,7 +1246,7 @@ function buildLayersUI() {
           tAnimFolder.addBinding(anim, 'max', { label: 'Max', min: p.min, max: p.max, step })
             .on('change', onChange);
           tAnimFolder.addBinding(anim, 'mode', {
-            label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Tangent': 'tan', 'Square': 'square', 'Random': 'random', 'Audio': 'audio', 'Bezier': 'bezier' },
+            label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Tangent': 'tan', 'Square': 'square', 'Random': 'random', 'Audio': 'audio', 'Bezier': 'bezier', 'Steps': 'steps' },
           }).on('change', () => { anim._expanded = true; rebuild(); });
           if (anim.mode === 'audio') {
             tAnimFolder.addBinding(anim, 'band', {
@@ -1228,6 +1258,9 @@ function buildLayersUI() {
           }
           if (anim.mode === 'bezier') {
             buildBezierEditor(anim, tAnimFolder.element, onChange);
+          }
+          if (anim.mode === 'steps') {
+            buildStepsEditor(anim, tAnimFolder.element, onChange);
           }
         }
       });
@@ -1290,7 +1323,7 @@ function buildLayersUI() {
         animFolder.addBinding(mod.animate, 'max', { label: 'Max', min: fnCfg.min, max: fnCfg.max, step: fnCfg.step })
           .on('change', onChange);
         animFolder.addBinding(mod.animate, 'mode', {
-          label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Tangent': 'tan', 'Square': 'square', 'Random': 'random', 'Audio': 'audio', 'Bezier': 'bezier' },
+          label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Tangent': 'tan', 'Square': 'square', 'Random': 'random', 'Audio': 'audio', 'Bezier': 'bezier', 'Steps': 'steps' },
         }).on('change', () => { mod.animate._expanded = true; rebuild(); });
         if (mod.animate.mode === 'audio') {
           animFolder.addBinding(mod.animate, 'band', {
@@ -1302,6 +1335,9 @@ function buildLayersUI() {
         }
         if (mod.animate.mode === 'bezier') {
           buildBezierEditor(mod.animate, animFolder.element, onChange);
+        }
+        if (mod.animate.mode === 'steps') {
+          buildStepsEditor(mod.animate, animFolder.element, onChange);
         }
       }
 
