@@ -6,6 +6,7 @@ import { saveToUrl, saveSceneToUrl, showWarning, encodeState, deserializeLayers,
 import { storeImage } from './imageStore.js';
 import * as Audio from './audio.js';
 import { tracks as libraryTracks } from './audioLibrary.js';
+import * as Transport from './transport.js';
 
 function formatTime(s) {
   if (!isFinite(s) || s < 0) return '0:00';
@@ -19,6 +20,7 @@ let layersPane = null;
 let uiContainer = null;
 let addPaneExpanded    = true;
 let audioPaneExpanded  = true;
+let tempoPaneExpanded  = true;
 let layersPaneExpanded = true;
 let scenesPaneExpanded = true;
 let audioLibraryTrack  = null; // filename of active library track, or null
@@ -42,7 +44,7 @@ function save() {
   if (isSaved) {
     saveSceneToUrl(activeSlot);
   } else {
-    saveToUrl(getLayers(), { addPane: addPaneExpanded, audioPane: audioPaneExpanded, layersPane: layersPaneExpanded, scenesPane: scenesPaneExpanded, audioTrack: audioLibraryTrack });
+    saveToUrl(getLayers(), { addPane: addPaneExpanded, audioPane: audioPaneExpanded, tempoPane: tempoPaneExpanded, layersPane: layersPaneExpanded, scenesPane: scenesPaneExpanded, audioTrack: audioLibraryTrack, bpm: Transport.getBpm() });
   }
   refreshSaveBtn();
   refreshUrlGauge();
@@ -374,12 +376,88 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   refreshUrlGauge();
 }
 
+function initTempoPane(container, uiState = {}) {
+  tempoPaneExpanded = uiState.tempoPane ?? true;
+  if (uiState.bpm) Transport.setBpm(uiState.bpm);
+
+  const pane = new Pane({ container, title: 'Tempo', expanded: tempoPaneExpanded });
+  pane.element.style.marginBottom = '1rem';
+  pane.on('fold', (ev) => { tempoPaneExpanded = ev.expanded; save(); });
+
+  const bpmObj = { bpm: Transport.getBpm() };
+  const bpmBinding = pane.addBinding(bpmObj, 'bpm', {
+    label: 'BPM', min: 20, max: 300, step: 1,
+  }).on('change', () => { Transport.setBpm(bpmObj.bpm); save(); });
+
+  Transport.setOnBpmChange((newBpm) => {
+    bpmObj.bpm = newBpm;
+    bpmBinding.refresh();
+    save();
+  });
+
+  const content = pane.element.querySelector('.tp-rotv_c') ?? pane.element;
+
+  // TAP button
+  const tapBtn = document.createElement('button');
+  tapBtn.textContent = 'TAP';
+  tapBtn.style.cssText = `
+    display: block; width: calc(100% - 8px); margin: 4px 4px 2px; box-sizing: border-box;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 2px; color: rgba(255,255,255,0.75); font-size: 14px;
+    font-family: inherit; font-weight: bold; letter-spacing: 0.12em;
+    padding: 10px; cursor: pointer;
+    transition: background 0.06s, border-color 0.06s;
+  `;
+  tapBtn.addEventListener('pointerdown', () => {
+    tapBtn.style.background   = 'rgba(255,255,255,0.18)';
+    tapBtn.style.borderColor  = 'rgba(255,255,255,0.5)';
+    Transport.tap();
+  });
+  tapBtn.addEventListener('pointerup',    () => { tapBtn.style.background = 'rgba(255,255,255,0.06)'; tapBtn.style.borderColor = 'rgba(255,255,255,0.18)'; });
+  tapBtn.addEventListener('pointerleave', () => { tapBtn.style.background = 'rgba(255,255,255,0.06)'; tapBtn.style.borderColor = 'rgba(255,255,255,0.18)'; });
+  content.appendChild(tapBtn);
+
+  // Transport start / stop
+  const transportRow = document.createElement('div');
+  transportRow.style.cssText = 'display:flex; gap:4px; margin: 2px 4px 6px;';
+
+  const btnBase = `
+    flex: 1; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 2px; color: rgba(255,255,255,0.35); font-size: 9px;
+    font-family: inherit; padding: 4px; cursor: pointer;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  `;
+  const startBtn = document.createElement('button');
+  startBtn.textContent = '▶ Start';
+  startBtn.style.cssText = btnBase;
+
+  const stopBtn = document.createElement('button');
+  stopBtn.textContent = '■ Stop';
+  stopBtn.style.cssText = btnBase;
+
+  function updateTransportBtns() {
+    const on = Transport.isRunning();
+    startBtn.style.background  = on ? 'rgba(100,220,130,0.15)' : 'rgba(255,255,255,0.04)';
+    startBtn.style.borderColor = on ? 'rgba(100,220,130,0.5)'  : 'rgba(255,255,255,0.1)';
+    startBtn.style.color       = on ? 'rgba(130,240,160,0.9)'  : 'rgba(255,255,255,0.35)';
+    stopBtn.style.color        = on ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.6)';
+  }
+
+  startBtn.addEventListener('click', () => { Transport.startTransport().then(updateTransportBtns); });
+  stopBtn.addEventListener('click',  () => { Transport.stopTransport(); updateTransportBtns(); });
+
+  transportRow.append(startBtn, stopBtn);
+  content.appendChild(transportRow);
+  updateTransportBtns();
+}
+
 export function initUI(container, uiState = {}, initialSceneSlot = null) {
   uiContainer = container;
   addPaneExpanded    = uiState.addPane    ?? true;
   layersPaneExpanded = uiState.layersPane ?? true;
 
   initAudioPane(container, uiState);
+  initTempoPane(container, uiState);
 
   initScenesPane(container, uiState, initialSceneSlot);
 
@@ -1117,6 +1195,48 @@ function buildBezierEditor(anim, folderEl, onchange) {
   draw();
 }
 
+const BEAT_DIVISIONS = [
+  { label: '1 beat',  value: 1  },
+  { label: '2 beats', value: 2  },
+  { label: '1 bar',   value: 4  },
+  { label: '2 bars',  value: 8  },
+  { label: '4 bars',  value: 16 },
+];
+
+function buildBeatEditor(anim, folderEl, onChange) {
+  const content = folderEl.querySelector('.tp-fldv_c') ?? folderEl;
+
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex; align-items:center; gap:6px; margin:2px 4px 4px;';
+
+  const label = document.createElement('span');
+  label.textContent = 'Every';
+  label.style.cssText = 'font-size:10px; font-family:inherit; color:rgba(255,255,255,0.5); flex-shrink:0; width:52px;';
+
+  const select = document.createElement('select');
+  select.style.cssText = `
+    flex: 1; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 2px; color: rgba(255,255,255,0.8); font-size: 10px; font-family: inherit;
+    padding: 4px 6px; outline: none; cursor: pointer;
+  `;
+  BEAT_DIVISIONS.forEach(({ label: l, value: v }) => {
+    const opt = document.createElement('option');
+    opt.value = String(v);
+    opt.textContent = l;
+    if ((anim.division ?? 4) === v) opt.selected = true;
+    select.appendChild(opt);
+  });
+  select.addEventListener('change', () => {
+    anim.division = parseInt(select.value, 10);
+    onChange();
+  });
+
+  row.append(label, select);
+  content.appendChild(row);
+
+  buildStepsEditor(anim, folderEl, onChange);
+}
+
 function buildStepsEditor(anim, folderEl, onChange) {
   const row = document.createElement('div');
   row.style.cssText = 'display:flex; align-items:center; gap:6px; margin:2px 4px 4px;';
@@ -1246,13 +1366,13 @@ function buildLayersUI() {
           tAnimFolder.addBinding(anim, 'max', { label: 'Max', min: p.min, max: p.max, step })
             .on('change', onChange);
           tAnimFolder.addBinding(anim, 'mode', {
-            label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Tangent': 'tan', 'Square': 'square', 'Random': 'random', 'Audio': 'audio', 'Bezier': 'bezier', 'Steps': 'steps' },
+            label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Tangent': 'tan', 'Square': 'square', 'Random': 'random', 'Audio': 'audio', 'Bezier': 'bezier', 'Steps': 'steps', 'Beat': 'beat' },
           }).on('change', () => { anim._expanded = true; rebuild(); });
           if (anim.mode === 'audio') {
             tAnimFolder.addBinding(anim, 'band', {
               label: 'Band', options: { 'Bass': 0, 'Low Mid': 1, 'High Mid': 2, 'Treble': 3 },
             }).on('change', onChange);
-          } else {
+          } else if (anim.mode !== 'beat') {
             tAnimFolder.addBinding(anim, 'speed', { label: 'Speed', min: 0.01, max: 5, step: 0.01 })
               .on('change', onChange);
           }
@@ -1261,6 +1381,9 @@ function buildLayersUI() {
           }
           if (anim.mode === 'steps') {
             buildStepsEditor(anim, tAnimFolder.element, onChange);
+          }
+          if (anim.mode === 'beat') {
+            buildBeatEditor(anim, tAnimFolder.element, onChange);
           }
         }
       });
@@ -1323,13 +1446,13 @@ function buildLayersUI() {
         animFolder.addBinding(mod.animate, 'max', { label: 'Max', min: fnCfg.min, max: fnCfg.max, step: fnCfg.step })
           .on('change', onChange);
         animFolder.addBinding(mod.animate, 'mode', {
-          label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Tangent': 'tan', 'Square': 'square', 'Random': 'random', 'Audio': 'audio', 'Bezier': 'bezier', 'Steps': 'steps' },
+          label: 'Mode', options: { 'Ramp': 'loop', 'Sine': 'sin', 'Tangent': 'tan', 'Square': 'square', 'Random': 'random', 'Audio': 'audio', 'Bezier': 'bezier', 'Steps': 'steps', 'Beat': 'beat' },
         }).on('change', () => { mod.animate._expanded = true; rebuild(); });
         if (mod.animate.mode === 'audio') {
           animFolder.addBinding(mod.animate, 'band', {
             label: 'Band', options: { 'Bass': 0, 'Low Mid': 1, 'High Mid': 2, 'Treble': 3 },
           }).on('change', onChange);
-        } else {
+        } else if (mod.animate.mode !== 'beat') {
           animFolder.addBinding(mod.animate, 'speed', { label: 'Speed', min: 0.01, max: 5, step: 0.01 })
             .on('change', onChange);
         }
@@ -1338,6 +1461,9 @@ function buildLayersUI() {
         }
         if (mod.animate.mode === 'steps') {
           buildStepsEditor(mod.animate, animFolder.element, onChange);
+        }
+        if (mod.animate.mode === 'beat') {
+          buildBeatEditor(mod.animate, animFolder.element, onChange);
         }
       }
 

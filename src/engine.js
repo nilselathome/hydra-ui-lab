@@ -1,5 +1,7 @@
 import { LAYER_TYPES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
 
+import { beats } from './transport.js';
+
 // Solve cubic bezier Y for a given X via binary search (8 iterations ≈ 0.4% precision).
 // Curve goes from (0,0) to (1,1); control points are (x1,y1) and (x2,y2).
 function bezierY(x1, y1, x2, y2, x) {
@@ -43,6 +45,14 @@ function animatedValue(animate, min, max) {
     return () => {
       const step = Math.floor(time * animate.speed);
       return vals[((step % vals.length) + vals.length) % vals.length];
+    };
+  }
+  if (animate.mode === 'beat') {
+    const vals = animate.steps?.length ? animate.steps : [min, max];
+    const div  = animate.division ?? 4;
+    return () => {
+      const idx = Math.floor(beats / div);
+      return vals[((idx % vals.length) + vals.length) % vals.length];
     };
   }
   return () => min + ((time * animate.speed) % range);
