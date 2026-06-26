@@ -272,3 +272,14 @@ export function clearLoop() {
 export function setSmoothing(v) {
   if (analyser) analyser.smoothingTimeConstant = Math.max(0, Math.min(1, v));
 }
+
+export function getLoop() {
+  return { loopA, loopB };
+}
+
+export function restoreLoop(a, b) {
+  loopA = a ?? null;
+  loopB = b ?? null;
+  if (activeEl && loopA !== null && loopB !== null) activeEl.loop = false;
+  notifyPlayback();
+}

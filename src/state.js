@@ -5,7 +5,7 @@ import { TRANSFORM_TYPES, MOD_FNS } from './layerDefs.js';
 function serializeTransform(t) {
   const animate = {};
   Object.entries(t.animate).forEach(([k, v]) => {
-    animate[k] = { enabled: v.enabled, mode: v.mode, speed: v.speed, min: v.min, max: v.max, band: v.band ?? 0, bezier: v.bezier ?? [0.5, 0, 0.5, 1], _expanded: v._expanded };
+    animate[k] = { enabled: v.enabled, mode: v.mode, speed: v.speed, min: v.min, max: v.max, band: v.band ?? 0, bezier: v.bezier ?? [0.5, 0, 0.5, 1], steps: v.steps ?? [], division: v.division ?? 4, _expanded: v._expanded };
   });
   return { type: t.type, params: { ...t.params }, animate, _expanded: t._expanded };
 }
@@ -17,7 +17,7 @@ function serializeMod(m) {
     src: m.src,
     amount: m.amount,
     srcParams: { ...m.srcParams },
-    animate: { enabled: m.animate.enabled, mode: m.animate.mode, speed: m.animate.speed, min: m.animate.min, max: m.animate.max, band: m.animate.band ?? 0, bezier: m.animate.bezier ?? [0.5, 0, 0.5, 1], _expanded: m.animate._expanded },
+    animate: { enabled: m.animate.enabled, mode: m.animate.mode, speed: m.animate.speed, min: m.animate.min, max: m.animate.max, band: m.animate.band ?? 0, bezier: m.animate.bezier ?? [0.5, 0, 0.5, 1], steps: m.animate.steps ?? [], division: m.animate.division ?? 4, _expanded: m.animate._expanded },
     _expanded: m._expanded,
   };
 }
@@ -56,6 +56,8 @@ function deserializeTransform(data) {
       max:       saved.max       ?? p.max,
       band:      saved.band      ?? 0,
       bezier:    saved.bezier    ?? [0.5, 0, 0.5, 1],
+      steps:     saved.steps     ?? [],
+      division:  saved.division  ?? 4,
       _expanded: saved._expanded ?? true,
     };
   });
@@ -78,6 +80,8 @@ function deserializeMod(data) {
       max:       data.animate?.max       ?? fnCfg.max,
       band:      data.animate?.band      ?? 0,
       bezier:    data.animate?.bezier    ?? [0.5, 0, 0.5, 1],
+      steps:     data.animate?.steps     ?? [],
+      division:  data.animate?.division  ?? 4,
       _expanded: data.animate?._expanded ?? true,
     },
     _expanded: data._expanded ?? true,
@@ -133,6 +137,12 @@ export async function getCompressedUrlLength(layers, uiState = {}) {
   const payload = { layers: layers.map(serializeLayer), ui: uiState };
   const encoded = await compressPayload(payload);
   return encoded.length;
+}
+
+export async function buildShareUrl(layers, uiState = {}) {
+  const payload = { layers: layers.map(serializeLayer), ui: uiState };
+  const encoded = await compressPayload(payload);
+  return location.origin + location.pathname + `#z=${encoded}`;
 }
 
 export async function saveToUrl(layers, uiState = {}) {
@@ -192,22 +202,30 @@ export async function loadFromUrl() {
 
 // ── Warning toast ─────────────────────────────────────────────────────────────
 
+export function showSuccess(msg) {
+  _showToast(msg, 'rgba(40,160,100,0.95)');
+}
+
 export function showWarning(msg) {
-  let el = document.getElementById('hydra-warning');
+  _showToast(msg, 'rgba(220,60,60,0.92)');
+}
+
+function _showToast(msg, bg) {
+  let el = document.getElementById('hydra-toast');
   if (!el) {
     el = document.createElement('div');
-    el.id = 'hydra-warning';
+    el.id = 'hydra-toast';
     el.style.cssText = `
       position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-      background: rgba(220,60,60,0.92); color: #fff;
-      padding: 8px 18px; border-radius: 4px;
+      color: #fff; padding: 8px 18px; border-radius: 4px;
       font-size: 11px; font-family: monospace; letter-spacing: 0.02em;
       z-index: 99999; pointer-events: none;
-      transition: opacity 0.4s;
+      transition: opacity 0.4s, background 0.15s;
     `;
     document.body.appendChild(el);
   }
   el.textContent = msg;
+  el.style.background = bg;
   el.style.opacity = '1';
   clearTimeout(el._t);
   el._t = setTimeout(() => { el.style.opacity = '0'; }, 4000);

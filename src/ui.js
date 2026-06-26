@@ -2,7 +2,7 @@ import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpan
 import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
 import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, applyState, registerGlsl, reloadThree } from './layers.js';
 import { render } from './engine.js';
-import { saveToUrl, saveSceneToUrl, showWarning, encodeState, deserializeLayers, getCompressedUrlLength } from './state.js';
+import { saveToUrl, saveSceneToUrl, buildShareUrl, showWarning, showSuccess, encodeState, deserializeLayers, getCompressedUrlLength } from './state.js';
 import { storeImage } from './imageStore.js';
 import * as Audio from './audio.js';
 import { tracks as libraryTracks } from './audioLibrary.js';
@@ -38,13 +38,28 @@ function refreshUrlGauge() {
   }, 250);
 }
 
+function getUiState() {
+  const { loopA, loopB } = Audio.getLoop();
+  return {
+    addPane:    addPaneExpanded,
+    audioPane:  audioPaneExpanded,
+    tempoPane:  tempoPaneExpanded,
+    layersPane: layersPaneExpanded,
+    scenesPane: scenesPaneExpanded,
+    audioTrack: audioLibraryTrack,
+    bpm:        Transport.getBpm(),
+    loopA,
+    loopB,
+  };
+}
+
 function save() {
-  const encoded = getLayersEncoded();
+  const encoded = getContentEncoded();
   const isSaved = activeSlot !== null && _cleanEncoded !== null && encoded === _cleanEncoded;
   if (isSaved) {
     saveSceneToUrl(activeSlot);
   } else {
-    saveToUrl(getLayers(), { addPane: addPaneExpanded, audioPane: audioPaneExpanded, tempoPane: tempoPaneExpanded, layersPane: layersPaneExpanded, scenesPane: scenesPaneExpanded, audioTrack: audioLibraryTrack, bpm: Transport.getBpm() });
+    saveToUrl(getLayers(), getUiState());
   }
   refreshSaveBtn();
   refreshUrlGauge();
@@ -52,7 +67,7 @@ function save() {
 
 function refreshSaveBtn() {
   if (!_saveSceneBtn) return;
-  const dirty = _cleanEncoded !== null && getLayersEncoded() !== _cleanEncoded;
+  const dirty = _cleanEncoded !== null && getContentEncoded() !== _cleanEncoded;
   if (dirty) {
     _saveSceneBtn.style.background   = 'rgba(255,150,40,0.3)';
     _saveSceneBtn.style.borderColor  = 'rgba(255,150,40,0.7)';
@@ -79,9 +94,16 @@ let _urlGaugeLabel = null;
 let _urlGaugeTimer = null;
 const URL_GAUGE_MAX = 8000;
 
-function getLayersEncoded() {
-  // Store layer data only (no UI pane state) so comparisons aren't thrown off by fold changes
-  return encodeState(getLayers(), {});
+function getContentEncoded() {
+  // Includes audio-relevant state so dirty detection catches track/loop/BPM changes.
+  // Deliberately excludes pane fold states so collapsing a panel doesn't mark things dirty.
+  const { loopA, loopB } = Audio.getLoop();
+  return encodeState(getLayers(), {
+    audioTrack: audioLibraryTrack,
+    bpm:        Transport.getBpm(),
+    loopA,
+    loopB,
+  });
 }
 
 function decodeStoredScene(raw) {
@@ -113,9 +135,8 @@ function refreshSceneButtons() {
   if (_saveSceneBtn)  _saveSceneBtn.textContent  = `Save${label}`;
   if (_clearSceneBtn) _clearSceneBtn.textContent = `Clear${label}`;
   if (_pasteSceneBtn) {
-    const hasClip = _clipboard !== null;
-    _pasteSceneBtn.style.opacity = hasClip ? '1' : '0.35';
-    _pasteSceneBtn.style.cursor  = hasClip ? 'pointer' : 'default';
+    _pasteSceneBtn.style.opacity = '1';
+    _pasteSceneBtn.style.cursor  = 'pointer';
   }
 }
 
@@ -179,6 +200,27 @@ function createSceneContextMenu() {
   return { show, hide };
 }
 
+function applySlotUiState(ui) {
+  if (!ui) return;
+  if (ui.bpm != null) Transport.setBpm(ui.bpm);
+  const loopA = ui.loopA ?? null;
+  const loopB = ui.loopB ?? null;
+  if (ui.audioTrack && libraryTracks.includes(ui.audioTrack)) {
+    audioLibraryTrack = ui.audioTrack;
+    const url = /^https?:\/\//.test(ui.audioTrack) ? ui.audioTrack : import.meta.env.BASE_URL + ui.audioTrack;
+    (async () => {
+      try {
+        await Audio.connectUrl(url);
+        if (loopA !== null && loopB !== null) Audio.restoreLoop(loopA, loopB);
+        _cleanEncoded = getContentEncoded();
+      } catch {}
+    })();
+  } else if (loopA !== null && loopB !== null) {
+    Audio.restoreLoop(loopA, loopB);
+    _cleanEncoded = getContentEncoded();
+  }
+}
+
 function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   scenesPaneExpanded = uiState.scenesPane ?? true;
   const pane = new Pane({ container, title: 'Scenes', expanded: scenesPaneExpanded });
@@ -201,7 +243,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
     btn.addEventListener('click', () => {
       if (activeSlot === slot) return; // already active, nothing to do
 
-      const dirty = _cleanEncoded !== null && getLayersEncoded() !== _cleanEncoded;
+      const dirty = _cleanEncoded !== null && getContentEncoded() !== _cleanEncoded;
 
       const stored = localStorage.getItem(SCENE_KEY(slot));
       if (stored) {
@@ -209,17 +251,18 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
         const data = decodeStoredScene(stored);
         if (!data) { showWarning(`Scene ${slot + 1} could not be loaded.`); return; }
         applyState(deserializeLayers(data.layers ?? data));
+        applySlotUiState(data.ui);
       } else if (dirty) {
         // Empty slot + unsaved changes → save current scene here instead of blanking
-        const encoded = getLayersEncoded();
+        const encoded = getContentEncoded();
         localStorage.setItem(SCENE_KEY(slot), encoded);
       } else {
         applyState([]); // empty slot, nothing dirty → blank canvas
       }
 
       activeSlot = slot;
+      _cleanEncoded = getContentEncoded();
       rebuild();
-      _cleanEncoded = getLayersEncoded();
       refreshSceneButtons();
       refreshSaveBtn();
     });
@@ -239,7 +282,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   content.appendChild(grid);
 
   activeSlot = initialSceneSlot ?? 0;
-  if (initialSceneSlot !== null) _cleanEncoded = getLayersEncoded();
+  if (initialSceneSlot !== null) _cleanEncoded = getContentEncoded();
   refreshSceneButtons();
 
   const btnRowStyle = `
@@ -285,19 +328,27 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   const copyBtn = document.createElement('button');
   copyBtn.textContent = 'Copy';
   copyBtn.style.cssText = btnBaseStyle;
-  copyBtn.addEventListener('click', () => {
-    _clipboard = getLayersEncoded();
+  copyBtn.addEventListener('click', async () => {
+    _clipboard = getContentEncoded();
+    try { await navigator.clipboard.writeText(_clipboard); } catch {}
     refreshSceneButtons();
+    showSuccess('Scene copied to clipboard');
   });
 
   _pasteSceneBtn = document.createElement('button');
   _pasteSceneBtn.textContent = 'Paste';
   _pasteSceneBtn.style.cssText = btnBaseStyle;
-  _pasteSceneBtn.addEventListener('click', () => {
-    if (!_clipboard) return;
+  _pasteSceneBtn.addEventListener('click', async () => {
+    let encoded = _clipboard;
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) encoded = text;
+    } catch {}
+    if (!encoded) return;
     if (getLayers().length > 0 && !confirm('Are you sure?')) return;
-    const data = decodeStoredScene(_clipboard);
-    if (!data) return;
+    const data = decodeStoredScene(encoded);
+    if (!data) { showWarning('Nothing valid to paste'); return; }
+    _clipboard = encoded;
     applyState(deserializeLayers(data.layers ?? data));
     rebuild();
     refreshSceneButtons();
@@ -307,7 +358,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   _saveSceneBtn.style.cssText = btnBaseStyle;
   _saveSceneBtn.addEventListener('click', () => {
     if (activeSlot === null) return;
-    const encoded = getLayersEncoded();
+    const encoded = getContentEncoded();
     localStorage.setItem(SCENE_KEY(activeSlot), encoded);
     _cleanEncoded = encoded;
     refreshSceneButtons();
@@ -323,7 +374,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
     localStorage.removeItem(SCENE_KEY(activeSlot));
     applyState([]);
     rebuild();
-    _cleanEncoded = getLayersEncoded();
+    _cleanEncoded = getContentEncoded();
     refreshSceneButtons();
     refreshSaveBtn();
   });
@@ -333,8 +384,28 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   btnRow2.appendChild(_saveSceneBtn);
   btnRow2.appendChild(_clearSceneBtn);
 
+  // Row 3: share
+  const btnRow3 = document.createElement('div');
+  btnRow3.style.cssText = btnRowStyle;
+
+  const shareBtn = document.createElement('button');
+  shareBtn.textContent = 'Share URL';
+  shareBtn.style.cssText = btnBaseStyle;
+  shareBtn.addEventListener('click', async () => {
+    try {
+      const url = await buildShareUrl(getLayers(), getUiState());
+      await navigator.clipboard.writeText(url);
+      showSuccess('Share URL copied to clipboard');
+    } catch {
+      showWarning('Could not copy to clipboard');
+    }
+  });
+
+  btnRow3.appendChild(shareBtn);
+
   content.appendChild(btnRow1);
   content.appendChild(btnRow2);
+  content.appendChild(btnRow3);
   refreshSceneButtons(); // set initial labels
 
   // URL size gauge
@@ -678,9 +749,9 @@ function initAudioPane(container, uiState = {}) {
     else Audio.playFile();
   });
 
-  setBtnA.addEventListener('click',  () => Audio.setLoopA());
-  setBtnB.addEventListener('click',  () => Audio.setLoopB());
-  clearBtn.addEventListener('click', () => Audio.clearLoop());
+  setBtnA.addEventListener('click',  () => { Audio.setLoopA();  save(); });
+  setBtnB.addEventListener('click',  () => { Audio.setLoopB();  save(); });
+  clearBtn.addEventListener('click', () => { Audio.clearLoop(); save(); });
 
   // ── Callbacks ──────────────────────────────────────────────────────────────
   Audio.setStatusCallback((st, label) => {
@@ -736,6 +807,8 @@ function initAudioPane(container, uiState = {}) {
     (async () => {
       try {
         const ok = await Audio.connectUrl(url);
+        if (uiState.loopA != null && uiState.loopB != null) Audio.restoreLoop(uiState.loopA, uiState.loopB);
+        _cleanEncoded = getContentEncoded();
         if (!ok) showAutoplayOverlay();
       } catch (e) {
         showWarning(e.message ?? 'Audio error');
