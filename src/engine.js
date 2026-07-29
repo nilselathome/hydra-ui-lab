@@ -87,12 +87,10 @@ function buildLayer(layer) {
 }
 
 export function render(layers) {
-  const visible = layers.filter(l => l.visible);
+  // Three.js layers are DOM overlays with their own RAF loop — exclude from Hydra chain.
+  const visible = layers.filter(l => l.visible && l.type !== 'three');
   if (visible.length === 0) { solid(0, 0, 0).out(o0); return; }
 
-  // Composite all layers inline — no intermediate output buffers needed.
-  // Each buildLayer() returns a Hydra chain node; compositing them directly
-  // compiles to a single GLSL shader pass, removing the o1-o3 buffer limit.
   let composite = buildLayer(visible[0]);
   for (let i = 1; i < visible.length; i++) {
     const layer = visible[i];

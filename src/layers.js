@@ -3,26 +3,74 @@ import { getImage } from './imageStore.js';
 
 // ── Three.js helpers ──────────────────────────────────────────────────────────
 
-const DEFAULT_THREE_CODE = `const geo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
-const mat = new THREE.MeshPhongMaterial({
-  color: 0x88ccff,
-  shininess: 120,
-  transparent: true,
-  opacity: 0.45,
-  side: THREE.DoubleSide,
+export const THREE_PRESETS = {
+  Cube: `// Available: THREE, scene, camera, hydraTexture, hydraCanvas
+// hydraTexture updates live from Hydra's canvas every frame.
+// Use envMap directly — scene.environment uses a cached PMREM cube map
+// and won't pick up live texture changes.
+hydraTexture.mapping = THREE.EquirectangularReflectionMapping;
+
+const geo = new THREE.BoxGeometry(1.4, 1.4, 1.4);
+const mat = new THREE.MeshStandardMaterial({
+  metalness: 1.0, roughness: 0.05,
+  envMap: hydraTexture, envMapIntensity: 1.5,
 });
 const cube = new THREE.Mesh(geo, mat);
 scene.add(cube);
-
-const light = new THREE.DirectionalLight(0xffffff, 1.2);
-light.position.set(1, 2, 2);
-scene.add(light);
-scene.add(new THREE.AmbientLight(0x222244, 1));
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
 function update(t) {
-  cube.rotation.x = t * 0.5;
-  cube.rotation.y = t * 0.7;
-}`;
+  cube.rotation.x = t * 0.4;
+  cube.rotation.y = t * 0.6;
+}`,
+
+  Donut: `hydraTexture.mapping = THREE.EquirectangularReflectionMapping;
+
+const geo = new THREE.TorusGeometry(0.8, 0.32, 64, 128);
+const mat = new THREE.MeshStandardMaterial({
+  metalness: 1.0, roughness: 0.05,
+  envMap: hydraTexture, envMapIntensity: 1.5,
+});
+const torus = new THREE.Mesh(geo, mat);
+scene.add(torus);
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+function update(t) {
+  torus.rotation.x = t * 0.5;
+  torus.rotation.y = t * 0.3;
+}`,
+
+  Star: `hydraTexture.mapping = THREE.EquirectangularReflectionMapping;
+
+const shape = new THREE.Shape();
+const spikes = 5, outer = 0.75, inner = 0.32;
+for (let i = 0; i < spikes * 2; i++) {
+  const r = i % 2 === 0 ? outer : inner;
+  const a = (i / (spikes * 2)) * Math.PI * 2 - Math.PI / 2;
+  const x = Math.cos(a) * r, y = Math.sin(a) * r;
+  i === 0 ? shape.moveTo(x, y) : shape.lineTo(x, y);
+}
+shape.closePath();
+const geo = new THREE.ExtrudeGeometry(shape, {
+  depth: 0.22, bevelEnabled: true,
+  bevelThickness: 0.06, bevelSize: 0.04, bevelSegments: 4,
+});
+geo.center();
+const mat = new THREE.MeshStandardMaterial({
+  metalness: 1.0, roughness: 0.05,
+  envMap: hydraTexture, envMapIntensity: 1.5,
+});
+const star = new THREE.Mesh(geo, mat);
+scene.add(star);
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+function update(t) {
+  star.rotation.y = t * 0.5;
+  star.rotation.z = Math.sin(t * 0.4) * 0.15;
+}`,
+};
+
+const DEFAULT_THREE_CODE = THREE_PRESETS.Cube;
 
 function evalThreeCode(layer) {
   const scene = layer._threeScene;
@@ -39,21 +87,21 @@ function evalThreeCode(layer) {
 
   layer._threeUpdate = null;
   try {
-    // User code runs with THREE and scene in scope; can define update(t) which gets returned
-    const fn = new Function('THREE', 'scene', `${layer._threeCode}\nreturn typeof update === 'function' ? update : null;`);
-    layer._threeUpdate = fn(window.THREE, scene);
+    // User code runs with THREE, scene, camera, hydraTexture, hydraCanvas in scope
+    const fn = new Function('THREE', 'scene', 'camera', 'hydraTexture', 'hydraCanvas', `${layer._threeCode}\nreturn typeof update === 'function' ? update : null;`);
+    layer._threeUpdate = fn(window.THREE, scene, layer._threeCamera, layer._hydraTexture, document.getElementById('hydraCanvas'));
   } catch (e) {
     console.warn('Three.js code error:', e);
   }
 }
 
+const CSS_BLEND_MAP = {
+  blend: 'normal', add: 'screen', mult: 'multiply',
+  diff: 'difference', sub: 'normal', layer: 'normal', mask: 'normal',
+};
+
 function createThreeLayer(layer) {
   if (!window.THREE) { console.warn('Three.js not loaded'); return; }
-
-  const slot = allocateSlot();
-  layer._hydraSlot   = slot;
-  layer._hydraSource = slot !== null ? window[`s${slot}`] : null;
-  if (!layer._hydraSource) return;
 
   const w = window.innerWidth;
   const h = window.innerHeight;
@@ -62,25 +110,41 @@ function createThreeLayer(layer) {
   renderer.setSize(w, h);
   renderer.setClearColor(0x000000, 0);
 
+  const el = renderer.domElement;
+  el.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:100;pointer-events:none;';
+  document.body.appendChild(el);
+
   const scene  = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 100);
-  camera.position.z = 3;
+  camera.position.z = 6;
+
+  // Hydra's output canvas used as a live texture source
+  const hydraCanvas  = document.getElementById('hydraCanvas');
+  const hydraTexture = new THREE.CanvasTexture(hydraCanvas);
 
   layer._threeRenderer = renderer;
   layer._threeScene    = scene;
   layer._threeCamera   = camera;
   layer._threeUpdate   = null;
   layer._threeRafId    = null;
+  layer._hydraTexture  = hydraTexture;
 
   evalThreeCode(layer);
 
-  layer._hydraSource.init({ src: renderer.domElement, dynamic: true });
-
   const startTime = performance.now();
   function tick() {
-    const t = (performance.now() - startTime) / 1000;
-    if (layer._threeUpdate) layer._threeUpdate(t);
-    renderer.render(scene, camera);
+    // Sync visibility / opacity / blend from layer state
+    const visible = layer.visible !== false;
+    el.style.display      = visible ? '' : 'none';
+    el.style.opacity      = String(layer.opacity ?? 1);
+    el.style.mixBlendMode = CSS_BLEND_MAP[layer.blendMode] ?? 'normal';
+
+    if (visible) {
+      hydraTexture.needsUpdate = true;
+      const t = (performance.now() - startTime) / 1000;
+      if (layer._threeUpdate) layer._threeUpdate(t);
+      renderer.render(scene, camera);
+    }
     layer._threeRafId = requestAnimationFrame(tick);
   }
   layer._threeRafId = requestAnimationFrame(tick);
@@ -88,7 +152,11 @@ function createThreeLayer(layer) {
 
 function destroyThreeLayer(layer) {
   if (layer._threeRafId) { cancelAnimationFrame(layer._threeRafId); layer._threeRafId = null; }
-  if (layer._threeRenderer) { layer._threeRenderer.dispose(); layer._threeRenderer = null; }
+  if (layer._threeRenderer) {
+    layer._threeRenderer.domElement.remove();
+    layer._threeRenderer.dispose();
+    layer._threeRenderer = null;
+  }
 }
 
 export function reloadThree(layer) {

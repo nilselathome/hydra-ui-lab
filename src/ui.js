@@ -1,6 +1,6 @@
 import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
 import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
-import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, applyState, registerGlsl, reloadThree } from './layers.js';
+import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, applyState, registerGlsl, reloadThree, THREE_PRESETS } from './layers.js';
 import { render } from './engine.js';
 import { saveToUrl, saveSceneToUrl, buildShareUrl, showWarning, showSuccess, encodeState, deserializeLayers, getCompressedUrlLength } from './state.js';
 import { storeImage } from './imageStore.js';
@@ -445,6 +445,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   content.appendChild(gaugeWrap);
 
   refreshUrlGauge();
+  addCollapseAllCtrl(pane);
 }
 
 function initTempoPane(container, uiState = {}) {
@@ -520,6 +521,7 @@ function initTempoPane(container, uiState = {}) {
   transportRow.append(startBtn, stopBtn);
   content.appendChild(transportRow);
   updateTransportBtns();
+  addCollapseAllCtrl(pane);
 }
 
 export function initUI(container, uiState = {}, initialSceneSlot = null) {
@@ -535,6 +537,7 @@ export function initUI(container, uiState = {}, initialSceneSlot = null) {
   addPane = new Pane({ container, title: 'Add Layer', expanded: addPaneExpanded });
   addPane.element.style.marginBottom = '1rem';
   addPane.on('fold', (ev) => { addPaneExpanded = ev.expanded; save(); });
+  addCollapseAllCtrl(addPane);
   Object.entries(LAYER_TYPES).forEach(([type, def]) => {
     if (def.noLayer) return;
     const btn = addPane.addButton({ title: def.shortLabel ?? def.label }).on('click', () => {
@@ -555,6 +558,7 @@ export function initUI(container, uiState = {}, initialSceneSlot = null) {
   layersPane = new Pane({ container, title: 'Layers', expanded: layersPaneExpanded });
   layersPane.element.style.marginBottom = '1rem';
   layersPane.on('fold', (ev) => { layersPaneExpanded = ev.expanded; save(); });
+  addCollapseAllCtrl(layersPane);
   buildLayersUI();
 }
 
@@ -815,6 +819,7 @@ function initAudioPane(container, uiState = {}) {
       }
     })();
   }
+  addCollapseAllCtrl(pane);
 }
 
 function showAutoplayOverlay() {
@@ -929,7 +934,7 @@ function addImageDropZone(folder, layer) {
     border-radius: 2px; color: #fff; font-size: 10px; font-family: inherit;
     padding: 4px 8px; cursor: pointer;
   `;
-  const applyUrl = () => {
+  const applyUrl = async () => {
     const url = urlInput.value.trim();
     if (!url) return;
     if (url.startsWith('data:')) {
@@ -941,7 +946,14 @@ function addImageDropZone(folder, layer) {
     }
     layer.imgUrl  = url;
     layer.imgName = '';
-    layer._hydraSource.initImage(url);
+    // Fetch as blob so external images are same-origin — avoids CORS canvas taint
+    // that would prevent Three.js from reading the Hydra canvas as a texture.
+    let loadUrl = url;
+    try {
+      const res = await fetch(url);
+      if (res.ok) loadUrl = URL.createObjectURL(await res.blob());
+    } catch (_) { /* cross-origin or network failure — fall back to direct URL */ }
+    layer._hydraSource.initImage(loadUrl);
     zone.textContent = `✓ ${url.split('/').pop() || url}`;
     presetSelect.value = '';
     render(getLayers());
@@ -1050,6 +1062,27 @@ function addTextControls(folder, layer) {
 function addThreeEditor(folder, layer) {
   const content = folder.element.querySelector('.tp-fldv_c') ?? folder.element;
 
+  const SELECT_CSS = `
+    display: block; width: calc(100% - 8px); margin: 4px 4px 0; box-sizing: border-box;
+    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 2px; color: #fff; font-size: 10px; font-family: inherit;
+    padding: 4px 6px; outline: none; cursor: pointer;
+  `;
+
+  const presetSelect = document.createElement('select');
+  presetSelect.style.cssText = SELECT_CSS;
+  const blankOpt = document.createElement('option');
+  blankOpt.value = '';
+  blankOpt.textContent = '— load preset —';
+  presetSelect.appendChild(blankOpt);
+  Object.keys(THREE_PRESETS).forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    presetSelect.appendChild(opt);
+  });
+  content.appendChild(presetSelect);
+
   const textarea = document.createElement('textarea');
   textarea.value      = layer._threeCode ?? '';
   textarea.spellcheck = false;
@@ -1063,6 +1096,15 @@ function addThreeEditor(folder, layer) {
     tab-size: 2; box-sizing: border-box;
   `;
 
+  presetSelect.addEventListener('change', () => {
+    const code = THREE_PRESETS[presetSelect.value];
+    if (!code) return;
+    textarea.value = code;
+    layer._threeCode = code;
+    reloadThree(layer);
+    save();
+  });
+
   textarea.addEventListener('keydown', (e) => {
     if (e.key !== 'Tab') return;
     e.preventDefault();
@@ -1073,6 +1115,7 @@ function addThreeEditor(folder, layer) {
 
   let debounce = null;
   textarea.addEventListener('input', () => {
+    presetSelect.value = ''; // custom edits clear the preset label
     clearTimeout(debounce);
     debounce = setTimeout(() => {
       layer._threeCode = textarea.value;
@@ -1352,6 +1395,35 @@ function rebuild() {
   save();
 }
 
+function addCollapseAllCtrl(paneOrFolder) {
+  const el = paneOrFolder.element;
+  const isRoot = el.classList.contains('tp-rotv');
+  const titleSel = isRoot ? '.tp-rotv_b' : '.tp-fldv_b';
+  const titleBtn = el.querySelector(titleSel);
+  if (!titleBtn || titleBtn.querySelector('[data-cc]')) return;
+
+  const ctrl = document.createElement('span');
+  ctrl.dataset.cc = '1';
+  ctrl.style.cssText = 'position:absolute;right:26px;top:50%;transform:translateY(-50%);font-size:9px;font-family:inherit;z-index:1;user-select:none;display:inline-flex;gap:1px;';
+
+  const mkBtn = (label, expand) => {
+    const s = document.createElement('span');
+    s.textContent = label;
+    s.style.cssText = 'color:rgba(255,255,255,0.22);cursor:pointer;padding:1px 3px;border-radius:2px;';
+    s.addEventListener('mouseenter', () => { s.style.color = 'rgba(255,255,255,0.65)'; s.style.background = 'rgba(255,255,255,0.08)'; });
+    s.addEventListener('mouseleave', () => { s.style.color = 'rgba(255,255,255,0.22)'; s.style.background = ''; });
+    s.addEventListener('click', (e) => {
+      e.stopPropagation();
+      paneOrFolder.children.forEach(c => { if ('expanded' in c) c.expanded = expand; });
+    });
+    return s;
+  };
+
+  ctrl.append(mkBtn('−', false), mkBtn('+', true));
+  titleBtn.style.position = 'relative';
+  titleBtn.appendChild(ctrl);
+}
+
 function buildLayersUI() {
   const scrollTop = uiContainer?.scrollTop ?? 0;
 
@@ -1372,6 +1444,7 @@ function buildLayersUI() {
 
     const f = layersPane.addFolder({ title: layer.name, expanded: layer._expanded });
     f.on('fold', (ev) => { layer._expanded = ev.expanded; save(); });
+    addCollapseAllCtrl(f);
 
     // Visibility toggle
     f.addBinding(layer, 'visible', { label: 'Visible' }).on('change', onChange);

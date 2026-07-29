@@ -110,7 +110,7 @@ export const LAYER_TYPES = {
     shortLabel: '3D',
     icon: 'ph-cube',
     params: [],
-    build: (p, layer) => layer._hydraSource ? src(layer._hydraSource) : solid(0, 0, 0),
+    build: () => solid(0, 0, 0), // DOM overlay — not part of Hydra chain
   },
 };
 
