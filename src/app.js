@@ -1,7 +1,7 @@
 import { getLayers, applyState, reloadThree } from './layers.js';
 import { render } from './engine.js';
 import { initUI } from './ui.js';
-import { loadFromUrl, deserializeLayers } from './state.js';
+import { loadFromUrl, deserializeLayers, loadGlobalAudioState } from './state.js';
 
 const canvas = document.getElementById('hydraCanvas');
 const dpr = window.devicePixelRatio || 1;
@@ -14,6 +14,9 @@ new Hydra({ canvas, detectAudio: false, makeGlobal: true, pb: true });
 // Hydra needs a tick before the GL context is ready to accept chains
 setTimeout(async () => {
   const savedData = await loadFromUrl();
+  // #z=/#s= links are self-contained snapshots (may embed audio for sharing).
+  // #scene=N and the blank/slot-0 fallback below use global audio instead.
+  const isShareLink = savedData != null && savedData.sceneSlot == null;
 
   // No URL params → load slot 0 from localStorage so scene 1 isn't a blank highlight
   let effectiveData = savedData;
@@ -31,7 +34,15 @@ setTimeout(async () => {
 
   if (effectiveData) applyState(deserializeLayers(effectiveData.layers ?? effectiveData));
 
-  initUI(document.getElementById('ui'), effectiveData?.ui ?? {}, effectiveData?.sceneSlot ?? null);
+  let uiState = effectiveData?.ui ?? {};
+  if (!isShareLink) {
+    // Scene slots no longer own audio — ignore any legacy embedded audioTrack/bpm/loop
+    // and apply the global audio/tempo state instead.
+    const { audioTrack, bpm, loopA, loopB, ...rest } = uiState;
+    uiState = { ...rest, ...(loadGlobalAudioState() ?? {}) };
+  }
+
+  initUI(document.getElementById('ui'), uiState, effectiveData?.sceneSlot ?? null);
   render(getLayers());
 
   // Re-evaluate Three.js layers after Hydra has rendered its first frame.

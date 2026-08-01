@@ -99,6 +99,21 @@ export function deserializeLayers(dataArray) {
 // ── URL encoding ──────────────────────────────────────────────────────────────
 
 const SCENE_KEY = (n) => `hydra-scene-${n}`;
+const GLOBAL_AUDIO_KEY = 'hydra-global-audio';
+
+// Audio track/loop/BPM are global (shared across all scenes), not part of any scene slot.
+export function saveGlobalAudioState(state) {
+  try { localStorage.setItem(GLOBAL_AUDIO_KEY, JSON.stringify(state)); } catch {}
+}
+
+export function loadGlobalAudioState() {
+  try {
+    const raw = localStorage.getItem(GLOBAL_AUDIO_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
 
 // Synchronous legacy encode — kept for dirty-check comparisons and localStorage scene slots
 export function encodeState(layers, uiState = {}) {

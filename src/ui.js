@@ -2,7 +2,7 @@ import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpan
 import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
 import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, applyState, registerGlsl, reloadThree, THREE_PRESETS } from './layers.js';
 import { render } from './engine.js';
-import { saveToUrl, saveSceneToUrl, buildShareUrl, showWarning, showSuccess, encodeState, deserializeLayers, getCompressedUrlLength } from './state.js';
+import { saveToUrl, saveSceneToUrl, buildShareUrl, showWarning, showSuccess, encodeState, deserializeLayers, getCompressedUrlLength, saveGlobalAudioState } from './state.js';
 import { storeImage } from './imageStore.js';
 import * as Audio from './audio.js';
 import { tracks as libraryTracks } from './audioLibrary.js';
@@ -38,22 +38,25 @@ function refreshUrlGauge() {
   }, 250);
 }
 
-function getUiState() {
+// Audio track/loop/BPM are global — shared across all scenes, not owned by any one of them.
+function getGlobalAudioState() {
   const { loopA, loopB } = Audio.getLoop();
+  return { audioTrack: audioLibraryTrack, bpm: Transport.getBpm(), loopA, loopB };
+}
+
+function getUiState() {
   return {
     addPane:    addPaneExpanded,
     audioPane:  audioPaneExpanded,
     tempoPane:  tempoPaneExpanded,
     layersPane: layersPaneExpanded,
     scenesPane: scenesPaneExpanded,
-    audioTrack: audioLibraryTrack,
-    bpm:        Transport.getBpm(),
-    loopA,
-    loopB,
+    ...getGlobalAudioState(),
   };
 }
 
 function save() {
+  saveGlobalAudioState(getGlobalAudioState());
   const encoded = getContentEncoded();
   const isSaved = activeSlot !== null && _cleanEncoded !== null && encoded === _cleanEncoded;
   if (isSaved) {
@@ -95,15 +98,9 @@ let _urlGaugeTimer = null;
 const URL_GAUGE_MAX = 8000;
 
 function getContentEncoded() {
-  // Includes audio-relevant state so dirty detection catches track/loop/BPM changes.
-  // Deliberately excludes pane fold states so collapsing a panel doesn't mark things dirty.
-  const { loopA, loopB } = Audio.getLoop();
-  return encodeState(getLayers(), {
-    audioTrack: audioLibraryTrack,
-    bpm:        Transport.getBpm(),
-    loopA,
-    loopB,
-  });
+  // Scenes are layers only — audio/tempo is global (see getGlobalAudioState) and
+  // deliberately excluded so switching/saving/copying a scene never touches playback.
+  return encodeState(getLayers());
 }
 
 function decodeStoredScene(raw) {
@@ -200,27 +197,6 @@ function createSceneContextMenu() {
   return { show, hide };
 }
 
-function applySlotUiState(ui) {
-  if (!ui) return;
-  if (ui.bpm != null) Transport.setBpm(ui.bpm);
-  const loopA = ui.loopA ?? null;
-  const loopB = ui.loopB ?? null;
-  if (ui.audioTrack && libraryTracks.includes(ui.audioTrack)) {
-    audioLibraryTrack = ui.audioTrack;
-    const url = /^https?:\/\//.test(ui.audioTrack) ? ui.audioTrack : import.meta.env.BASE_URL + ui.audioTrack;
-    (async () => {
-      try {
-        await Audio.connectUrl(url);
-        if (loopA !== null && loopB !== null) Audio.restoreLoop(loopA, loopB);
-        _cleanEncoded = getContentEncoded();
-      } catch {}
-    })();
-  } else if (loopA !== null && loopB !== null) {
-    Audio.restoreLoop(loopA, loopB);
-    _cleanEncoded = getContentEncoded();
-  }
-}
-
 function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   scenesPaneExpanded = uiState.scenesPane ?? true;
   const pane = new Pane({ container, title: 'Scenes', expanded: scenesPaneExpanded });
@@ -251,7 +227,6 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
         const data = decodeStoredScene(stored);
         if (!data) { showWarning(`Scene ${slot + 1} could not be loaded.`); return; }
         applyState(deserializeLayers(data.layers ?? data));
-        applySlotUiState(data.ui);
       } else if (dirty) {
         // Empty slot + unsaved changes → save current scene here instead of blanking
         const encoded = getContentEncoded();
