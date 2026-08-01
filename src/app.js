@@ -14,9 +14,24 @@ new Hydra({ canvas, detectAudio: false, makeGlobal: true, pb: true });
 // Hydra needs a tick before the GL context is ready to accept chains
 setTimeout(async () => {
   const savedData = await loadFromUrl();
-  if (savedData) applyState(deserializeLayers(savedData.layers ?? savedData));
 
-  initUI(document.getElementById('ui'), savedData?.ui ?? {}, savedData?.sceneSlot ?? null);
+  // No URL params → load slot 0 from localStorage so scene 1 isn't a blank highlight
+  let effectiveData = savedData;
+  if (!effectiveData) {
+    const raw = localStorage.getItem('hydra-scene-0');
+    if (raw) {
+      try {
+        const payload = JSON.parse(decodeURIComponent(atob(raw)));
+        effectiveData = Array.isArray(payload)
+          ? { layers: payload, sceneSlot: 0 }
+          : { ...payload, sceneSlot: 0 };
+      } catch {}
+    }
+  }
+
+  if (effectiveData) applyState(deserializeLayers(effectiveData.layers ?? effectiveData));
+
+  initUI(document.getElementById('ui'), effectiveData?.ui ?? {}, effectiveData?.sceneSlot ?? null);
   render(getLayers());
 
   // Re-evaluate Three.js layers after Hydra has rendered its first frame.
