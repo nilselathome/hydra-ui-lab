@@ -217,29 +217,8 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
     applySlotStyle(btn, filled, false);
 
     btn.addEventListener('click', () => {
-      if (activeSlot === slot) return; // already active, nothing to do
-
-      const dirty = _cleanEncoded !== null && getContentEncoded() !== _cleanEncoded;
-
-      const stored = localStorage.getItem(SCENE_KEY(slot));
-      if (stored) {
-        if (dirty && !confirm('Discard unsaved changes?')) return;
-        const data = decodeStoredScene(stored);
-        if (!data) { showWarning(`Scene ${slot + 1} could not be loaded.`); return; }
-        applyState(deserializeLayers(data.layers ?? data));
-      } else if (dirty) {
-        // Empty slot + unsaved changes → save current scene here instead of blanking
-        const encoded = getContentEncoded();
-        localStorage.setItem(SCENE_KEY(slot), encoded);
-      } else {
-        applyState([]); // empty slot, nothing dirty → blank canvas
-      }
-
-      activeSlot = slot;
-      _cleanEncoded = getContentEncoded();
-      rebuild();
-      refreshSceneButtons();
-      refreshSaveBtn();
+      stopScenePlayer();
+      goToScene(slot);
     });
 
     btn.addEventListener('contextmenu', (e) => {
@@ -260,6 +239,135 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   if (initialSceneSlot !== null) _cleanEncoded = getContentEncoded();
   refreshSceneButtons();
 
+  function goToScene(slot, { silent = false } = {}) {
+    if (activeSlot === slot) return;
+    const dirty = _cleanEncoded !== null && getContentEncoded() !== _cleanEncoded;
+    const stored = localStorage.getItem(SCENE_KEY(slot));
+    if (stored) {
+      if (dirty && !silent && !confirm('Discard unsaved changes?')) return;
+      const data = decodeStoredScene(stored);
+      if (!data) { showWarning(`Scene ${slot + 1} could not be loaded.`); return; }
+      applyState(deserializeLayers(data.layers ?? data));
+    } else if (dirty && !silent) {
+      // Empty slot + unsaved changes → save current scene here instead of blanking
+      localStorage.setItem(SCENE_KEY(slot), getContentEncoded());
+    } else {
+      applyState([]); // empty slot, nothing dirty → blank canvas
+    }
+    activeSlot = slot;
+    _cleanEncoded = getContentEncoded();
+    rebuild();
+    refreshSceneButtons();
+    refreshSaveBtn();
+  }
+
+  // ── Scene player: auto-advance through saved scenes ───────────────────────
+  let scenePlayerRunning = false;
+  let scenePlayerTimer   = null;
+  let scenePlayerStep    = 0;
+
+  const getFilledSlots = () => {
+    const result = [];
+    for (let i = 0; i < SCENE_COUNT; i++) if (localStorage.getItem(SCENE_KEY(i)) !== null) result.push(i);
+    return result;
+  };
+
+  const parseTimingList = () => timingInput.value
+    .split(',')
+    .map(s => parseFloat(s.trim()))
+    .filter(n => isFinite(n) && n > 0);
+
+  const durationForStep = (step) => {
+    const list = parseTimingList();
+    return list.length ? list[step % list.length] : intervalSlider.valueAsNumber;
+  };
+
+  function updatePlayBtn() {
+    if (scenePlayerRunning) {
+      playBtn.textContent = '■ Stop';
+      playBtn.style.background  = 'rgba(100,220,130,0.15)';
+      playBtn.style.borderColor = 'rgba(100,220,130,0.5)';
+      playBtn.style.color       = 'rgba(130,240,160,0.9)';
+    } else {
+      playBtn.textContent = '▶ Play';
+      playBtn.style.background  = 'rgba(255,255,255,0.04)';
+      playBtn.style.borderColor = 'rgba(255,255,255,0.1)';
+      playBtn.style.color       = 'rgba(255,255,255,0.6)';
+    }
+  }
+
+  function stopScenePlayer() {
+    if (!scenePlayerRunning) return;
+    scenePlayerRunning = false;
+    clearTimeout(scenePlayerTimer);
+    scenePlayerTimer = null;
+    updatePlayBtn();
+  }
+
+  function tick() {
+    const filled = getFilledSlots();
+    if (filled.length < 2) { stopScenePlayer(); return; }
+    const idx = filled.indexOf(activeSlot);
+    const nextSlot = filled[(idx + 1 + filled.length) % filled.length];
+    goToScene(nextSlot, { silent: true });
+    const dur = durationForStep(scenePlayerStep);
+    scenePlayerStep++;
+    scenePlayerTimer = setTimeout(tick, Math.max(0.1, dur) * 1000);
+  }
+
+  function startScenePlayer() {
+    const filled = getFilledSlots();
+    if (filled.length < 2) { showWarning('Save at least 2 scenes to play.'); return; }
+    scenePlayerRunning = true;
+    scenePlayerStep = 0;
+    updatePlayBtn();
+    const dur = durationForStep(scenePlayerStep);
+    scenePlayerStep++;
+    scenePlayerTimer = setTimeout(tick, Math.max(0.1, dur) * 1000);
+  }
+
+  const playerWrap = document.createElement('div');
+  playerWrap.style.cssText = 'margin: 2px 4px 8px; display:flex; flex-direction:column; gap:5px;';
+
+  const playBtn = document.createElement('button');
+  playBtn.style.cssText = `
+    width: 100%; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 2px; color: rgba(255,255,255,0.6); font-size: 10px;
+    font-family: inherit; font-weight: bold; padding: 6px; cursor: pointer;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  `;
+  playBtn.addEventListener('click', () => {
+    if (scenePlayerRunning) stopScenePlayer();
+    else startScenePlayer();
+  });
+
+  const intervalRow = document.createElement('div');
+  intervalRow.style.cssText = 'display:flex; align-items:center; gap:6px;';
+  const intervalLabel = document.createElement('span');
+  intervalLabel.textContent = 'interval';
+  intervalLabel.style.cssText = 'font-size:9px; font-family:monospace; color:rgba(255,255,255,0.3); flex-shrink:0;';
+  const intervalSlider = document.createElement('input');
+  intervalSlider.type = 'range'; intervalSlider.min = '0.5'; intervalSlider.max = '60'; intervalSlider.step = '0.5'; intervalSlider.value = '5';
+  intervalSlider.style.cssText = 'flex:1; accent-color: rgba(255,255,255,0.6); cursor:pointer; height:3px;';
+  const intervalValue = document.createElement('span');
+  intervalValue.style.cssText = 'font-size:9px; font-family:monospace; color:rgba(255,255,255,0.4); flex-shrink:0; min-width:28px; text-align:right;';
+  intervalValue.textContent = `${intervalSlider.value}s`;
+  intervalSlider.addEventListener('input', () => { intervalValue.textContent = `${intervalSlider.value}s`; });
+  intervalRow.append(intervalLabel, intervalSlider, intervalValue);
+
+  const timingInput = document.createElement('input');
+  timingInput.type = 'text';
+  timingInput.placeholder = 'custom timings (s), comma-separated — overrides interval';
+  timingInput.style.cssText = `
+    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 2px; color: #fff; font-size: 9px; font-family: monospace;
+    padding: 4px 6px; outline: none;
+  `;
+
+  playerWrap.append(playBtn, intervalRow, timingInput);
+  content.appendChild(playerWrap);
+  updatePlayBtn();
+
   const btnRowStyle = `
     display: flex; gap: 4px; margin: 4px 4px 6px;
   `;
@@ -278,6 +386,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   clearBtn.style.cssText = btnBaseStyle;
   clearBtn.addEventListener('click', () => {
     if (!confirm('Clear all saved scenes? This cannot be undone.')) return;
+    stopScenePlayer();
     for (let i = 0; i < SCENE_COUNT; i++) localStorage.removeItem(SCENE_KEY(i));
     activeSlot = 0;
     refreshSceneButtons();
@@ -288,6 +397,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   resetBtn.style.cssText = btnBaseStyle;
   resetBtn.addEventListener('click', () => {
     if (!confirm('Delete all saved scenes and reset the app? This cannot be undone.')) return;
+    stopScenePlayer();
     for (let i = 0; i < SCENE_COUNT; i++) localStorage.removeItem(SCENE_KEY(i));
     history.replaceState(null, '', location.pathname);
     location.reload();
@@ -346,6 +456,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   _clearSceneBtn.addEventListener('click', () => {
     if (activeSlot === null) return;
     if (!confirm('Are you sure?')) return;
+    stopScenePlayer();
     localStorage.removeItem(SCENE_KEY(activeSlot));
     applyState([]);
     rebuild();
