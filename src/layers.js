@@ -452,6 +452,7 @@ export function removeLayer(id) {
 
 export function applyState(dataArray) {
   // Clear existing state
+  layers.forEach(l => { if (l.type === 'three') destroyThreeLayer(l); });
   layers = [];
   usedSlots.clear();
   nextId = 1;
