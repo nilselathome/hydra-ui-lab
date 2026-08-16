@@ -68,18 +68,24 @@ function save() {
   refreshUrlGauge();
 }
 
+function applyOrangeTint(btn, active) {
+  if (!btn) return;
+  if (active) {
+    btn.style.background   = 'rgba(255,150,40,0.3)';
+    btn.style.borderColor  = 'rgba(255,150,40,0.7)';
+    btn.style.color        = 'rgba(255,190,80,0.95)';
+  } else {
+    btn.style.background   = '';
+    btn.style.borderColor  = '';
+    btn.style.color        = '';
+  }
+}
+
 function refreshSaveBtn() {
   if (!_saveSceneBtn) return;
   const dirty = _cleanEncoded !== null && getContentEncoded() !== _cleanEncoded;
-  if (dirty) {
-    _saveSceneBtn.style.background   = 'rgba(255,150,40,0.3)';
-    _saveSceneBtn.style.borderColor  = 'rgba(255,150,40,0.7)';
-    _saveSceneBtn.style.color        = 'rgba(255,190,80,0.95)';
-  } else {
-    _saveSceneBtn.style.background   = '';
-    _saveSceneBtn.style.borderColor  = '';
-    _saveSceneBtn.style.color        = '';
-  }
+  applyOrangeTint(_saveSceneBtn, dirty);
+  applyOrangeTint(_saveAsBtn, dirty || _saveAsArmed);
 }
 
 // ── Scene slots ────────────────────────────────────────────────────────────────
@@ -90,6 +96,8 @@ let _sceneButtons = [];     // DOM button elements, index === slot
 let _saveSceneBtn  = null;
 let _clearSceneBtn = null;
 let _pasteSceneBtn = null;
+let _saveAsBtn     = null;
+let _saveAsArmed   = false;
 let _clipboard     = null;
 let _cleanEncoded  = null; // encoded state at last load/save — used to detect unsaved changes
 let _urlGaugeFill  = null;
@@ -112,21 +120,32 @@ function decodeStoredScene(raw) {
   }
 }
 
-function applySlotStyle(btn, filled, active) {
+function injectBlinkStyle() {
+  if (document.getElementById('scene-blink-style')) return;
+  const style = document.createElement('style');
+  style.id = 'scene-blink-style';
+  style.textContent = '@keyframes scene-slot-blink { 0%,100% { border-color:rgba(255,255,255,0.1); color:rgba(255,255,255,0.25); } 50% { border-color:rgba(255,150,40,0.9); color:rgba(255,180,60,0.95); } }';
+  document.head.appendChild(style);
+}
+
+function applySlotStyle(btn, filled, active, blinking = false) {
   const base = 'width:100%;border-radius:2px;cursor:pointer;font-size:9px;font-family:inherit;font-weight:bold;padding:5px 0;border:1px solid;transition:background 0.15s,border-color 0.15s,color 0.15s;';
+  let style;
   if (active) {
-    btn.style.cssText = base + 'background:rgba(100,200,120,0.3);border-color:rgba(100,200,120,0.7);color:rgba(140,230,160,0.95)';
+    style = base + 'background:rgba(100,200,120,0.3);border-color:rgba(100,200,120,0.7);color:rgba(140,230,160,0.95)';
   } else if (filled) {
-    btn.style.cssText = base + 'background:rgba(100,160,255,0.15);border-color:rgba(100,160,255,0.4);color:rgba(140,190,255,0.9)';
+    style = base + 'background:rgba(100,160,255,0.15);border-color:rgba(100,160,255,0.4);color:rgba(140,190,255,0.9)';
   } else {
-    btn.style.cssText = base + 'background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.1);color:rgba(255,255,255,0.25)';
+    style = base + 'background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.1);color:rgba(255,255,255,0.25)';
   }
+  if (blinking) style += ';animation:scene-slot-blink 0.9s ease-in-out infinite';
+  btn.style.cssText = style;
 }
 
 function refreshSceneButtons() {
   _sceneButtons.forEach((btn, slot) => {
     const filled = localStorage.getItem(SCENE_KEY(slot)) !== null;
-    applySlotStyle(btn, filled, activeSlot === slot);
+    applySlotStyle(btn, filled, activeSlot === slot, _saveAsArmed && !filled);
   });
   const label = activeSlot !== null ? ` ${activeSlot + 1}` : '';
   if (_saveSceneBtn)  _saveSceneBtn.textContent  = `Save${label}`;
@@ -135,6 +154,8 @@ function refreshSceneButtons() {
     _pasteSceneBtn.style.opacity = '1';
     _pasteSceneBtn.style.cursor  = 'pointer';
   }
+  if (_saveAsBtn) _saveAsBtn.textContent = _saveAsArmed ? 'Pick a slot…' : 'Save As';
+  refreshSaveBtn();
 }
 
 // ── Scene context menu (singleton) ────────────────────────────────────────────
@@ -204,6 +225,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   pane.on('fold', (ev) => { scenesPaneExpanded = ev.expanded; save(); });
 
   const contextMenu = createSceneContextMenu();
+  injectBlinkStyle();
 
   const grid = document.createElement('div');
   grid.style.cssText = 'display:grid;grid-template-columns:repeat(8,1fr);gap:3px;padding:6px 4px 4px';
@@ -217,6 +239,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
     applySlotStyle(btn, filled, false);
 
     btn.addEventListener('click', () => {
+      if (_saveAsArmed) { handleSaveAsTarget(slot); return; }
       stopScenePlayer();
       goToScene(slot);
     });
@@ -238,6 +261,43 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   activeSlot = initialSceneSlot ?? 0;
   if (initialSceneSlot !== null) _cleanEncoded = getContentEncoded();
   refreshSceneButtons();
+
+  // ── Save As: arm-then-pick-a-slot flow ─────────────────────────────────────
+  function armSaveAs() {
+    _saveAsArmed = true;
+    refreshSceneButtons();
+  }
+
+  function disarmSaveAs() {
+    if (!_saveAsArmed) return;
+    _saveAsArmed = false;
+    refreshSceneButtons();
+  }
+
+  function handleSaveAsTarget(slot) {
+    const existing = localStorage.getItem(SCENE_KEY(slot));
+    if (existing && !confirm(`Overwrite existing scene ${slot + 1}?`)) return; // stay armed, pick again
+    const encoded = getContentEncoded();
+    localStorage.setItem(SCENE_KEY(slot), encoded);
+    _cleanEncoded = encoded;
+    activeSlot = slot;
+    disarmSaveAs();
+    rebuild();
+    refreshSceneButtons();
+    refreshSaveBtn();
+    saveSceneToUrl(slot);
+    showSuccess(`Saved to scene ${slot + 1}`);
+  }
+
+  document.addEventListener('pointerdown', (e) => {
+    if (!_saveAsArmed) return;
+    if (_saveAsBtn && _saveAsBtn.contains(e.target)) return; // toggle button handles its own click
+    if (grid.contains(e.target)) return; // slot buttons handle their own click
+    disarmSaveAs();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') disarmSaveAs();
+  });
 
   function goToScene(slot, { silent = false } = {}) {
     if (activeSlot === slot) return;
@@ -465,9 +525,19 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
     refreshSaveBtn();
   });
 
+  _saveAsBtn = document.createElement('button');
+  _saveAsBtn.textContent = 'Save As';
+  _saveAsBtn.style.cssText = btnBaseStyle;
+  _saveAsBtn.addEventListener('click', () => {
+    stopScenePlayer();
+    if (_saveAsArmed) disarmSaveAs();
+    else armSaveAs();
+  });
+
   btnRow2.appendChild(copyBtn);
   btnRow2.appendChild(_pasteSceneBtn);
   btnRow2.appendChild(_saveSceneBtn);
+  btnRow2.appendChild(_saveAsBtn);
   btnRow2.appendChild(_clearSceneBtn);
 
   // Row 3: share
