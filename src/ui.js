@@ -7,6 +7,7 @@ import { storeImage } from './imageStore.js';
 import * as Audio from './audio.js';
 import { tracks as libraryTracks } from './audioLibrary.js';
 import * as Transport from './transport.js';
+import PRESET_IMAGES from 'virtual:preset-images';
 
 function formatTime(s) {
   if (!isFinite(s) || s < 0) return '0:00';
@@ -1019,60 +1020,7 @@ function addImageDropZone(folder, layer) {
 
   if (!layer._hydraSource) { content.appendChild(zone); return; }
 
-  // Preset image select
-  const PRESET_IMAGES = [
-    'IMG_0160.jpg',
-    'IMG_0162.jpg',
-    'IMG_0162.png',
-    'IMG_0672.jpg',
-    'IMG_0762.jpg',
-    'IMG_1240.jpg',
-    'IMG_1679.png',
-    'IMG_2216.png',
-    'IMG_2472.jpg',
-    'IMG_2485.png',
-    'IMG_2601.jpg',
-    'IMG_2629.png',
-    'IMG_2633.jpg',
-    'IMG_2836.png',
-    'IMG_3139.png',
-    'IMG_3301.png',
-    'IMG_3304.png',
-    'IMG_3405.png',
-    'IMG_3737.png',
-    'IMG_3740.png',
-    'IMG_3747.png',
-    'IMG_3762.png',
-    'IMG_3810.jpg',
-    'IMG_3845.png',
-    'IMG_3930.png',
-    'IMG_3935.png',
-    'IMG_3936.png',
-    'IMG_3938.png',
-    'IMG_3950.png',
-    'IMG_3952.png',
-    'IMG_3968.png',
-    'IMG_3969.png',
-    'IMG_4058.png',
-    'IMG_4668.png',
-    'IMG_4697.jpg',
-    'IMG_4854.png',
-    'IMG_5086.png',
-    'IMG_5089.png',
-    'IMG_5160.png',
-    'IMG_5175.png',
-    'IMG_5305.png',
-    'IMG_5324.png',
-    'IMG_5825.png',
-    'procreate_fvr-01.png',
-    'procreate_fvr-02.png',
-    'procreate_fvr-03.png',
-    'procreate_la-01.jpg',
-    'procreate-g3_1.webp',
-    'procreate-g3_2.webp',
-    'procreate-g3_3.webp',
-    'procreate-g3_4.webp',
-  ];
+  // Preset image select — list is generated at build/dev time from public/ (see vite.config.js)
   const presetSelect = document.createElement('select');
   presetSelect.style.cssText = `
     width: calc(100% - 8px); margin: 4px 4px 0; box-sizing: border-box;
