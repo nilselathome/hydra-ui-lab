@@ -2,12 +2,18 @@ import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpan
 import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
 import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, applyState, registerGlsl, reloadThree, THREE_PRESETS } from './layers.js';
 import { render } from './engine.js';
-import { saveToUrl, saveSceneToUrl, buildShareUrl, showWarning, showSuccess, encodeState, deserializeLayers, getCompressedUrlLength, saveGlobalAudioState } from './state.js';
+import {
+  saveToUrl, saveSceneToUrl, buildShareUrl, showWarning, showSuccess, encodeState, deserializeLayers,
+  getCompressedUrlLength, saveGlobalAudioState, sceneKey, listBanks, getActiveBankId, setActiveBankId,
+  createBank, renameBank, duplicateBank, deleteBank, resetAllBanks, exportBank, importBankFile,
+  decodeEncodedScene, SCENES_PER_BANK,
+} from './state.js';
 import { storeImage } from './imageStore.js';
 import * as Audio from './audio.js';
 import { tracks as libraryTracks } from './audioLibrary.js';
 import * as Transport from './transport.js';
 import PRESET_IMAGES from 'virtual:preset-images';
+import PRESET_BANKS from 'virtual:preset-banks';
 
 function formatTime(s) {
   if (!isFinite(s) || s < 0) return '0:00';
@@ -58,6 +64,14 @@ function getUiState() {
 
 function save() {
   saveGlobalAudioState(getGlobalAudioState());
+  if (isPreview()) {
+    // Read-only preset preview: never touch localStorage or the #z=/#scene= URL
+    // forms — just keep ?preset=&scene= in sync with whatever's on screen.
+    if (activeSlot !== null) savePreviewSceneToUrl(activeSlot);
+    refreshSaveBtn();
+    refreshUrlGauge();
+    return;
+  }
   const encoded = getContentEncoded();
   const isSaved = activeSlot !== null && _cleanEncoded !== null && encoded === _cleanEncoded;
   if (isSaved) {
@@ -67,6 +81,12 @@ function save() {
   }
   refreshSaveBtn();
   refreshUrlGauge();
+}
+
+function savePreviewSceneToUrl(slot) {
+  const params = new URLSearchParams(location.search);
+  params.set('scene', String(slot + 1));
+  history.replaceState(null, '', `${location.pathname}?${params.toString()}`);
 }
 
 function applyOrangeTint(btn, active) {
@@ -89,11 +109,13 @@ function refreshSaveBtn() {
   applyOrangeTint(_saveAsBtn, dirty || _saveAsArmed);
 }
 
-// ── Scene slots ────────────────────────────────────────────────────────────────
-const SCENE_COUNT = 16;
-const SCENE_KEY   = (n) => `hydra-scene-${n}`;
+// ── Scene slots / banks ──────────────────────────────────────────────────────────
+const SCENE_COUNT = SCENES_PER_BANK;
+let activeBankId  = null;   // active bank id, or null while previewing a preset
+let previewBank   = null;   // { name, scenes: [...] } when previewing a read-only preset
 let activeSlot    = null;   // slot index (0-based), or null
 let _sceneButtons = [];     // DOM button elements, index === slot
+let _bankSelect    = null;
 let _saveSceneBtn  = null;
 let _clearSceneBtn = null;
 let _pasteSceneBtn = null;
@@ -106,20 +128,38 @@ let _urlGaugeLabel = null;
 let _urlGaugeTimer = null;
 const URL_GAUGE_MAX = 8000;
 
+function isPreview() {
+  return previewBank !== null;
+}
+
+// Reads a slot's raw encoded value from whichever source is active: the real
+// (localStorage-backed) bank, or an in-memory read-only preset preview.
+function slotRaw(slot) {
+  if (isPreview()) return previewBank.scenes[slot] ?? null;
+  return localStorage.getItem(sceneKey(activeBankId, slot));
+}
+
+function slotFilled(slot) {
+  return slotRaw(slot) !== null;
+}
+
+function writeSlot(slot, encoded) {
+  if (isPreview()) return; // UI disables writes while previewing
+  localStorage.setItem(sceneKey(activeBankId, slot), encoded);
+}
+
+function clearSlotStorage(slot) {
+  if (isPreview()) return;
+  localStorage.removeItem(sceneKey(activeBankId, slot));
+}
+
 function getContentEncoded() {
   // Scenes are layers only — audio/tempo is global (see getGlobalAudioState) and
   // deliberately excluded so switching/saving/copying a scene never touches playback.
   return encodeState(getLayers());
 }
 
-function decodeStoredScene(raw) {
-  try {
-    const payload = JSON.parse(decodeURIComponent(atob(raw)));
-    return Array.isArray(payload) ? { layers: payload } : payload;
-  } catch {
-    return null;
-  }
-}
+const decodeStoredScene = decodeEncodedScene;
 
 function injectBlinkStyle() {
   if (document.getElementById('scene-blink-style')) return;
@@ -145,7 +185,7 @@ function applySlotStyle(btn, filled, active, blinking = false) {
 
 function refreshSceneButtons() {
   _sceneButtons.forEach((btn, slot) => {
-    const filled = localStorage.getItem(SCENE_KEY(slot)) !== null;
+    const filled = slotFilled(slot);
     applySlotStyle(btn, filled, activeSlot === slot, _saveAsArmed && !filled);
   });
   const label = activeSlot !== null ? ` ${activeSlot + 1}` : '';
@@ -203,7 +243,7 @@ function createSceneContextMenu() {
 
   clearItem.addEventListener('click', () => {
     if (currentSlot === null) return;
-    localStorage.removeItem(SCENE_KEY(currentSlot));
+    clearSlotStorage(currentSlot);
     if (activeSlot === currentSlot) activeSlot = null;
     refreshSceneButtons();
     hide();
@@ -219,14 +259,174 @@ function createSceneContextMenu() {
   return { show, hide };
 }
 
-function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
+function initScenesPane(container, uiState = {}, initialSceneSlot = null, previewData = null) {
   scenesPaneExpanded = uiState.scenesPane ?? true;
   const pane = new Pane({ container, title: 'Scenes', expanded: scenesPaneExpanded });
   pane.element.style.marginBottom = '1rem';
   pane.on('fold', (ev) => { scenesPaneExpanded = ev.expanded; save(); });
 
+  const content = pane.element.querySelector('.tp-rotv_c') ?? pane.element;
+
+  previewBank = previewData ? { name: previewData.name, scenes: previewData.scenes, audio: previewData.audio ?? null } : null;
+  if (previewBank) {
+    activeBankId = null;
+    // app.js already resolved which scene to open (?scene=N, or the first non-empty one)
+    let slot = initialSceneSlot;
+    if (slot == null) slot = previewBank.scenes.findIndex(s => s != null);
+    activeSlot = slot !== -1 ? slot : null;
+    _cleanEncoded = getContentEncoded(); // layers already applied during boot
+  } else {
+    activeBankId = getActiveBankId();
+    activeSlot = initialSceneSlot ?? 0;
+    if (initialSceneSlot !== null) _cleanEncoded = getContentEncoded();
+  }
+
   const contextMenu = createSceneContextMenu();
   injectBlinkStyle();
+
+  // ── Bank switcher ───────────────────────────────────────────────────────────
+  const bankBtnStyle = `
+    flex: none; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 2px; color: rgba(255,255,255,0.5); font-size: 10px;
+    font-family: inherit; padding: 3px 6px; cursor: pointer;
+  `;
+
+  const bankRow = document.createElement('div');
+  bankRow.style.cssText = 'display:flex; align-items:center; gap:3px; margin:6px 4px 4px;';
+
+  _bankSelect = document.createElement('select');
+  _bankSelect.style.cssText = `
+    flex: 1; min-width: 0; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 2px; color: #fff; font-size: 10px; font-family: monospace; padding: 3px 4px;
+  `;
+  _bankSelect.addEventListener('change', () => switchBank(_bankSelect.value));
+
+  const newBankBtn = document.createElement('button');
+  newBankBtn.textContent = '+';
+  newBankBtn.title = 'New bank';
+  newBankBtn.style.cssText = bankBtnStyle;
+  newBankBtn.addEventListener('click', () => {
+    const name = prompt('New bank name', `Bank ${listBanks().length + 1}`);
+    if (!name || !name.trim()) return;
+    switchBank(createBank(name.trim()));
+  });
+
+  const renameBankBtn = document.createElement('button');
+  renameBankBtn.textContent = '✎';
+  renameBankBtn.title = 'Rename bank';
+  renameBankBtn.style.cssText = bankBtnStyle;
+  renameBankBtn.addEventListener('click', () => {
+    if (activeBankId === null) return;
+    const current = listBanks().find(b => b.id === activeBankId);
+    const name = prompt('Rename bank', current?.name ?? '');
+    if (!name || !name.trim()) return;
+    renameBank(activeBankId, name.trim());
+    refreshBankSelect();
+  });
+
+  const dupBankBtn = document.createElement('button');
+  dupBankBtn.textContent = '⧉';
+  dupBankBtn.title = 'Duplicate bank';
+  dupBankBtn.style.cssText = bankBtnStyle;
+  dupBankBtn.addEventListener('click', () => {
+    if (activeBankId === null) return;
+    const id = duplicateBank(activeBankId);
+    if (id) switchBank(id);
+  });
+
+  const delBankBtn = document.createElement('button');
+  delBankBtn.textContent = '✕';
+  delBankBtn.title = 'Delete bank';
+  delBankBtn.style.cssText = bankBtnStyle;
+  delBankBtn.addEventListener('click', () => {
+    if (activeBankId === null || listBanks().length <= 1) return;
+    const current = listBanks().find(b => b.id === activeBankId);
+    if (!confirm(`Delete bank "${current?.name ?? ''}" and all its scenes? This cannot be undone.`)) return;
+    stopScenePlayer();
+    const nextId = deleteBank(activeBankId);
+    activeBankId = null; // force switchBank to actually reload
+    switchBank(nextId, { force: true });
+  });
+
+  const saveCopyBtn = document.createElement('button');
+  saveCopyBtn.textContent = 'Save a copy';
+  saveCopyBtn.style.cssText = bankBtnStyle + ';flex:1;display:none;';
+  saveCopyBtn.addEventListener('click', () => {
+    if (!isPreview()) return;
+    const keepSlot = activeSlot;
+    const bundledAudio = previewBank.audio;
+    const id = importBankFile({ type: 'hydra-bank', version: 2, name: previewBank.name, scenes: previewBank.scenes });
+    // Carry over the preset's soundtrack so it doesn't cut out on exiting preview.
+    if (bundledAudio) saveGlobalAudioState(bundledAudio);
+    previewBank = null;
+    activeBankId = id;
+    setActiveBankId(id);
+    activeSlot = keepSlot;
+    _cleanEncoded = getContentEncoded(); // canvas already shows this slot's content
+    refreshBankSelect();
+    refreshSceneButtons();
+    refreshSaveBtn();
+    showSuccess('Saved a local copy — now editable');
+  });
+
+  bankRow.append(_bankSelect, newBankBtn, renameBankBtn, dupBankBtn, delBankBtn, saveCopyBtn);
+  content.appendChild(bankRow);
+
+  if (PRESET_BANKS.length) {
+    const presetsRow = document.createElement('div');
+    presetsRow.style.cssText = 'display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin:0 4px 6px;';
+    const presetsLabel = document.createElement('span');
+    presetsLabel.textContent = 'presets:';
+    presetsLabel.style.cssText = 'font-size:9px; font-family:monospace; color:rgba(255,255,255,0.25);';
+    presetsRow.appendChild(presetsLabel);
+    PRESET_BANKS.forEach(name => {
+      const btn = document.createElement('button');
+      btn.textContent = name;
+      btn.style.cssText = bankBtnStyle;
+      btn.addEventListener('click', () => {
+        location.href = `${location.pathname}?preset=${encodeURIComponent(name)}`;
+      });
+      presetsRow.appendChild(btn);
+    });
+    content.appendChild(presetsRow);
+  }
+
+  function refreshBankSelect() {
+    _bankSelect.innerHTML = '';
+    if (isPreview()) {
+      const opt = document.createElement('option');
+      opt.textContent = `${previewBank.name} (preview)`;
+      _bankSelect.appendChild(opt);
+      _bankSelect.disabled = true;
+    } else {
+      _bankSelect.disabled = false;
+      listBanks().forEach(b => {
+        const opt = document.createElement('option');
+        opt.value = b.id;
+        opt.textContent = b.name;
+        opt.selected = b.id === activeBankId;
+        _bankSelect.appendChild(opt);
+      });
+    }
+    refreshPreviewLock();
+  }
+
+  function refreshPreviewLock() {
+    const preview = isPreview();
+    [newBankBtn, renameBankBtn, dupBankBtn, delBankBtn].forEach(btn => { btn.style.display = preview ? 'none' : ''; });
+    saveCopyBtn.style.display = preview ? '' : 'none';
+    if (!preview) {
+      const onlyOne = listBanks().length <= 1;
+      delBankBtn.disabled = onlyOne;
+      delBankBtn.style.opacity = onlyOne ? '0.3' : '';
+    }
+    [_saveSceneBtn, _clearSceneBtn, _saveAsBtn, clearBtn, exportBtn, importBtn].forEach(btn => {
+      if (!btn) return;
+      btn.disabled = preview;
+      btn.style.opacity = preview ? '0.3' : '';
+      btn.style.pointerEvents = preview ? 'none' : '';
+    });
+  }
 
   const grid = document.createElement('div');
   grid.style.cssText = 'display:grid;grid-template-columns:repeat(8,1fr);gap:3px;padding:6px 4px 4px';
@@ -236,8 +436,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   for (let slot = 0; slot < SCENE_COUNT; slot++) {
     const btn    = document.createElement('button');
     btn.textContent = String(slot + 1); // display 1-16, index 0-15
-    const filled = localStorage.getItem(SCENE_KEY(slot)) !== null;
-    applySlotStyle(btn, filled, false);
+    applySlotStyle(btn, slotFilled(slot), false);
 
     btn.addEventListener('click', () => {
       if (_saveAsArmed) { handleSaveAsTarget(slot); return; }
@@ -246,7 +445,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
     });
 
     btn.addEventListener('contextmenu', (e) => {
-      if (!localStorage.getItem(SCENE_KEY(slot))) return; // nothing to do on empty slots
+      if (isPreview() || !slotFilled(slot)) return; // nothing to do on empty/read-only slots
       e.preventDefault();
       contextMenu.show(slot, e.clientX, e.clientY);
     });
@@ -255,12 +454,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
     grid.appendChild(btn);
   }
 
-  // Inject grid into the pane's collapsible content area
-  const content = pane.element.querySelector('.tp-rotv_c') ?? pane.element;
   content.appendChild(grid);
-
-  activeSlot = initialSceneSlot ?? 0;
-  if (initialSceneSlot !== null) _cleanEncoded = getContentEncoded();
   refreshSceneButtons();
 
   // ── Save As: arm-then-pick-a-slot flow ─────────────────────────────────────
@@ -276,10 +470,11 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   }
 
   function handleSaveAsTarget(slot) {
-    const existing = localStorage.getItem(SCENE_KEY(slot));
+    if (isPreview()) return;
+    const existing = slotFilled(slot);
     if (existing && !confirm(`Overwrite existing scene ${slot + 1}?`)) return; // stay armed, pick again
     const encoded = getContentEncoded();
-    localStorage.setItem(SCENE_KEY(slot), encoded);
+    writeSlot(slot, encoded);
     _cleanEncoded = encoded;
     activeSlot = slot;
     disarmSaveAs();
@@ -303,21 +498,45 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   function goToScene(slot, { silent = false } = {}) {
     if (activeSlot === slot) return;
     const dirty = _cleanEncoded !== null && getContentEncoded() !== _cleanEncoded;
-    const stored = localStorage.getItem(SCENE_KEY(slot));
-    if (stored) {
+    const raw = slotRaw(slot);
+    if (raw) {
       if (dirty && !silent && !confirm('Discard unsaved changes?')) return;
-      const data = decodeStoredScene(stored);
+      const data = decodeStoredScene(raw);
       if (!data) { showWarning(`Scene ${slot + 1} could not be loaded.`); return; }
       applyState(deserializeLayers(data.layers ?? data));
-    } else if (dirty && !silent) {
+    } else if (dirty && !silent && !isPreview()) {
       // Empty slot + unsaved changes → save current scene here instead of blanking
-      localStorage.setItem(SCENE_KEY(slot), getContentEncoded());
+      writeSlot(slot, getContentEncoded());
     } else {
-      applyState([]); // empty slot, nothing dirty → blank canvas
+      applyState([]); // empty slot, nothing dirty (or read-only preview) → blank canvas
     }
     activeSlot = slot;
     _cleanEncoded = getContentEncoded();
     rebuild();
+    refreshSceneButtons();
+    refreshSaveBtn();
+  }
+
+  function switchBank(id, { force = false } = {}) {
+    if (isPreview() || id === null || id === activeBankId) { refreshBankSelect(); return; }
+    if (!force) {
+      const dirty = _cleanEncoded !== null && getContentEncoded() !== _cleanEncoded;
+      if (dirty && !confirm('Discard unsaved changes?')) { refreshBankSelect(); return; }
+    }
+    stopScenePlayer();
+    activeBankId = id;
+    setActiveBankId(id);
+    const raw = slotRaw(0);
+    if (raw) {
+      const data = decodeStoredScene(raw);
+      applyState(data ? deserializeLayers(data.layers ?? data) : []);
+    } else {
+      applyState([]);
+    }
+    activeSlot = 0;
+    _cleanEncoded = getContentEncoded();
+    rebuild();
+    refreshBankSelect();
     refreshSceneButtons();
     refreshSaveBtn();
   }
@@ -329,7 +548,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
 
   const getFilledSlots = () => {
     const result = [];
-    for (let i = 0; i < SCENE_COUNT; i++) if (localStorage.getItem(SCENE_KEY(i)) !== null) result.push(i);
+    for (let i = 0; i < SCENE_COUNT; i++) if (slotFilled(i)) result.push(i);
     return result;
   };
 
@@ -443,29 +662,75 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   btnRow1.style.cssText = btnRowStyle;
 
   const clearBtn = document.createElement('button');
-  clearBtn.textContent = 'Clear localStorage';
+  clearBtn.textContent = 'Clear bank';
   clearBtn.style.cssText = btnBaseStyle;
   clearBtn.addEventListener('click', () => {
-    if (!confirm('Clear all saved scenes? This cannot be undone.')) return;
+    if (isPreview()) return;
+    if (!confirm('Clear all scenes in this bank? This cannot be undone.')) return;
     stopScenePlayer();
-    for (let i = 0; i < SCENE_COUNT; i++) localStorage.removeItem(SCENE_KEY(i));
+    for (let i = 0; i < SCENE_COUNT; i++) clearSlotStorage(i);
     activeSlot = 0;
     refreshSceneButtons();
   });
 
   const resetBtn = document.createElement('button');
-  resetBtn.textContent = 'Reset all';
+  resetBtn.textContent = 'Reset everything';
   resetBtn.style.cssText = btnBaseStyle;
   resetBtn.addEventListener('click', () => {
-    if (!confirm('Delete all saved scenes and reset the app? This cannot be undone.')) return;
+    if (!confirm('Delete ALL banks and scenes and reset the app? This cannot be undone.')) return;
     stopScenePlayer();
-    for (let i = 0; i < SCENE_COUNT; i++) localStorage.removeItem(SCENE_KEY(i));
+    resetAllBanks();
     history.replaceState(null, '', location.pathname);
     location.reload();
   });
 
+  const exportBtn = document.createElement('button');
+  exportBtn.textContent = 'Export';
+  exportBtn.style.cssText = btnBaseStyle;
+  exportBtn.addEventListener('click', () => {
+    if (isPreview() || activeBankId === null) return;
+    const data = exportBank(activeBankId);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${data.name.replace(/[^a-z0-9_-]+/gi, '_')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showSuccess('Bank exported');
+  });
+
+  const importInput = document.createElement('input');
+  importInput.type = 'file';
+  importInput.accept = 'application/json,.json';
+  importInput.style.display = 'none';
+  importInput.addEventListener('change', async () => {
+    const file = importInput.files[0];
+    importInput.value = '';
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      const id = importBankFile(data);
+      switchBank(id);
+      showSuccess(`Imported "${data.name ?? 'bank'}"`);
+    } catch (e) {
+      showWarning('Could not import bank file');
+      console.error(e);
+    }
+  });
+  document.body.appendChild(importInput);
+
+  const importBtn = document.createElement('button');
+  importBtn.textContent = 'Import';
+  importBtn.style.cssText = btnBaseStyle;
+  importBtn.addEventListener('click', () => importInput.click());
+
   btnRow1.appendChild(clearBtn);
   btnRow1.appendChild(resetBtn);
+  btnRow1.appendChild(exportBtn);
+  btnRow1.appendChild(importBtn);
 
   // Row 2: per-scene actions
   const btnRow2 = document.createElement('div');
@@ -503,9 +768,9 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   _saveSceneBtn = document.createElement('button');
   _saveSceneBtn.style.cssText = btnBaseStyle;
   _saveSceneBtn.addEventListener('click', () => {
-    if (activeSlot === null) return;
+    if (isPreview() || activeSlot === null) return;
     const encoded = getContentEncoded();
-    localStorage.setItem(SCENE_KEY(activeSlot), encoded);
+    writeSlot(activeSlot, encoded);
     _cleanEncoded = encoded;
     refreshSceneButtons();
     refreshSaveBtn();
@@ -515,10 +780,10 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   _clearSceneBtn = document.createElement('button');
   _clearSceneBtn.style.cssText = btnBaseStyle;
   _clearSceneBtn.addEventListener('click', () => {
-    if (activeSlot === null) return;
+    if (isPreview() || activeSlot === null) return;
     if (!confirm('Are you sure?')) return;
     stopScenePlayer();
-    localStorage.removeItem(SCENE_KEY(activeSlot));
+    clearSlotStorage(activeSlot);
     applyState([]);
     rebuild();
     _cleanEncoded = getContentEncoded();
@@ -530,6 +795,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   _saveAsBtn.textContent = 'Save As';
   _saveAsBtn.style.cssText = btnBaseStyle;
   _saveAsBtn.addEventListener('click', () => {
+    if (isPreview()) return;
     stopScenePlayer();
     if (_saveAsArmed) disarmSaveAs();
     else armSaveAs();
@@ -564,6 +830,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null) {
   content.appendChild(btnRow2);
   content.appendChild(btnRow3);
   refreshSceneButtons(); // set initial labels
+  refreshBankSelect();
 
   // URL size gauge
   const gaugeWrap = document.createElement('div');
@@ -681,7 +948,7 @@ function initTempoPane(container, uiState = {}) {
   addCollapseAllCtrl(pane);
 }
 
-export function initUI(container, uiState = {}, initialSceneSlot = null) {
+export function initUI(container, uiState = {}, initialSceneSlot = null, previewData = null) {
   uiContainer = container;
   addPaneExpanded    = uiState.addPane    ?? true;
   layersPaneExpanded = uiState.layersPane ?? true;
@@ -689,7 +956,7 @@ export function initUI(container, uiState = {}, initialSceneSlot = null) {
   initAudioPane(container, uiState);
   initTempoPane(container, uiState);
 
-  initScenesPane(container, uiState, initialSceneSlot);
+  initScenesPane(container, uiState, initialSceneSlot, previewData);
 
   addPane = new Pane({ container, title: 'Add Layer', expanded: addPaneExpanded });
   addPane.element.style.marginBottom = '1rem';
