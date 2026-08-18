@@ -42,7 +42,48 @@ function presetImagesPlugin() {
   };
 }
 
+const presetsDir = path.resolve(publicDir, 'presets');
+
+function listPresetBanks() {
+  if (!fs.existsSync(presetsDir)) return [];
+  return fs.readdirSync(presetsDir)
+    .filter(f => f.toLowerCase().endsWith('.json'))
+    .map(f => f.slice(0, -5))
+    .sort();
+}
+
+// Scans public/presets/ for bundled bank files (see src/state.js exportBank /
+// importBankFile) so showcase links (?preset=name) and the in-app picker never
+// drift out of sync with what's actually on disk.
+function presetBanksPlugin() {
+  const virtualModuleId = 'virtual:preset-banks';
+  const resolvedVirtualModuleId = '\0' + virtualModuleId;
+
+  return {
+    name: 'preset-banks',
+    resolveId(id) {
+      if (id === virtualModuleId) return resolvedVirtualModuleId;
+    },
+    load(id) {
+      if (id === resolvedVirtualModuleId) {
+        return `export default ${JSON.stringify(listPresetBanks())};`;
+      }
+    },
+    configureServer(server) {
+      const onFsEvent = (file) => {
+        if (!file.startsWith(presetsDir)) return;
+        const mod = server.moduleGraph.getModuleById(resolvedVirtualModuleId);
+        if (mod) server.moduleGraph.invalidateModule(mod);
+        server.ws.send({ type: 'full-reload' });
+      };
+      server.watcher.add(presetsDir);
+      server.watcher.on('add', onFsEvent);
+      server.watcher.on('unlink', onFsEvent);
+    },
+  };
+}
+
 export default {
   base: '/hydra-ui-lab/',
-  plugins: [presetImagesPlugin()],
+  plugins: [presetImagesPlugin(), presetBanksPlugin()],
 }

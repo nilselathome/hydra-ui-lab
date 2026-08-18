@@ -98,7 +98,6 @@ export function deserializeLayers(dataArray) {
 
 // ── URL encoding ──────────────────────────────────────────────────────────────
 
-const SCENE_KEY = (n) => `hydra-scene-${n}`;
 const GLOBAL_AUDIO_KEY = 'hydra-global-audio';
 
 // Audio track/loop/BPM are global (shared across all scenes), not part of any scene slot.
@@ -110,6 +109,175 @@ export function loadGlobalAudioState() {
   try {
     const raw = localStorage.getItem(GLOBAL_AUDIO_KEY);
     return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+// ── Scene banks ───────────────────────────────────────────────────────────────
+// A bank is a named collection of SCENES_PER_BANK scene slots. Scenes used to be
+// one flat set of slots; banks let that set be duplicated, exported/imported as a
+// file, and swapped wholesale (see migrateLegacyScenes for the one-time upgrade).
+
+const BANKS_KEY = 'hydra-banks';
+const ACTIVE_BANK_KEY = 'hydra-active-bank';
+const LEGACY_SCENE_KEY = (n) => `hydra-scene-${n}`;
+export const SCENES_PER_BANK = 16;
+
+export function sceneKey(bankId, n) {
+  return `hydra-bank-${bankId}-scene-${n}`;
+}
+
+function readBanks() {
+  try {
+    const raw = localStorage.getItem(BANKS_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeBanks(banks) {
+  localStorage.setItem(BANKS_KEY, JSON.stringify(banks));
+}
+
+// Runs once: wraps any pre-existing flat hydra-scene-N slots into a "Bank 1" bank.
+function migrateLegacyScenes() {
+  if (readBanks()) return;
+  const id = 'default';
+  for (let i = 0; i < SCENES_PER_BANK; i++) {
+    const raw = localStorage.getItem(LEGACY_SCENE_KEY(i));
+    if (raw !== null) {
+      localStorage.setItem(sceneKey(id, i), raw);
+      localStorage.removeItem(LEGACY_SCENE_KEY(i));
+    }
+  }
+  writeBanks([{ id, name: 'Bank 1' }]);
+  localStorage.setItem(ACTIVE_BANK_KEY, id);
+}
+
+export function listBanks() {
+  migrateLegacyScenes();
+  return readBanks() ?? [];
+}
+
+export function getActiveBankId() {
+  const banks = listBanks();
+  const stored = localStorage.getItem(ACTIVE_BANK_KEY);
+  if (stored && banks.some(b => b.id === stored)) return stored;
+  return banks[0]?.id ?? null;
+}
+
+export function setActiveBankId(id) {
+  localStorage.setItem(ACTIVE_BANK_KEY, id);
+}
+
+function genBankId() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+function uniqueBankName(name) {
+  const existing = new Set(listBanks().map(b => b.name));
+  if (!existing.has(name)) return name;
+  let i = 2;
+  while (existing.has(`${name} (${i})`)) i++;
+  return `${name} (${i})`;
+}
+
+export function createBank(name) {
+  const banks = listBanks();
+  const id = genBankId();
+  banks.push({ id, name: uniqueBankName(name) });
+  writeBanks(banks);
+  return id;
+}
+
+export function renameBank(id, name) {
+  const banks = listBanks();
+  const bank = banks.find(b => b.id === id);
+  if (!bank) return;
+  bank.name = uniqueBankName(name);
+  writeBanks(banks);
+}
+
+export function duplicateBank(id) {
+  const banks = listBanks();
+  const src = banks.find(b => b.id === id);
+  if (!src) return null;
+  const newId = genBankId();
+  banks.push({ id: newId, name: uniqueBankName(`${src.name} copy`) });
+  writeBanks(banks);
+  for (let i = 0; i < SCENES_PER_BANK; i++) {
+    const raw = localStorage.getItem(sceneKey(id, i));
+    if (raw !== null) localStorage.setItem(sceneKey(newId, i), raw);
+  }
+  return newId;
+}
+
+// Refuses to delete the last remaining bank. Returns the id of the bank that
+// should now be active (unchanged unless the deleted bank was the active one).
+export function deleteBank(id) {
+  const banks = listBanks();
+  if (banks.length <= 1) return null;
+  const idx = banks.findIndex(b => b.id === id);
+  if (idx === -1) return getActiveBankId();
+  banks.splice(idx, 1);
+  writeBanks(banks);
+  for (let i = 0; i < SCENES_PER_BANK; i++) localStorage.removeItem(sceneKey(id, i));
+  if (localStorage.getItem(ACTIVE_BANK_KEY) === id) setActiveBankId(banks[0].id);
+  return getActiveBankId();
+}
+
+export function resetAllBanks() {
+  listBanks().forEach(b => {
+    for (let i = 0; i < SCENES_PER_BANK; i++) localStorage.removeItem(sceneKey(b.id, i));
+  });
+  localStorage.removeItem(BANKS_KEY);
+  localStorage.removeItem(ACTIVE_BANK_KEY);
+}
+
+// Bundles the exporter's current global audio state (Library track/BPM/loop —
+// see saveGlobalAudioState) alongside the scenes, so a showcase link can carry
+// its own soundtrack. Only Library-selected tracks are captured this way
+// (uploads/typed URLs aren't shareable or persisted today either).
+export function exportBank(id) {
+  const bank = listBanks().find(b => b.id === id);
+  const scenes = [];
+  for (let i = 0; i < SCENES_PER_BANK; i++) scenes.push(localStorage.getItem(sceneKey(id, i)));
+  return { type: 'hydra-bank', version: 2, name: bank?.name ?? 'Bank', scenes, audio: loadGlobalAudioState() };
+}
+
+// Creates a new bank from an exported/preset bank object and writes its scenes.
+// Always additive — never overwrites an existing bank.
+export function importBankFile(data) {
+  if (!data || data.type !== 'hydra-bank' || !Array.isArray(data.scenes)) {
+    throw new Error('Not a valid bank file');
+  }
+  const id = createBank(data.name || 'Imported bank');
+  data.scenes.slice(0, SCENES_PER_BANK).forEach((raw, i) => {
+    if (raw !== null && raw !== undefined) localStorage.setItem(sceneKey(id, i), raw);
+  });
+  return id;
+}
+
+// Fetches a bundled repo preset (see vite.config.js's presetBanksPlugin) for
+// read-only preview — never touches localStorage.
+export async function loadPresetBank(name) {
+  const res = await fetch(`${import.meta.env.BASE_URL}presets/${name}.json`);
+  if (!res.ok) throw new Error(`Preset "${name}" not found`);
+  const data = await res.json();
+  if (!data || data.type !== 'hydra-bank' || !Array.isArray(data.scenes)) {
+    throw new Error('Invalid preset file');
+  }
+  return data;
+}
+
+// Shared decode for a single encoded scene slot value (base64 JSON, possibly a
+// bare layers array from older saves).
+export function decodeEncodedScene(raw) {
+  try {
+    const payload = JSON.parse(decodeURIComponent(atob(raw)));
+    return Array.isArray(payload) ? { layers: payload } : payload;
   } catch {
     return null;
   }
@@ -176,19 +344,15 @@ export function saveSceneToUrl(slot) {
 }
 
 export async function loadFromUrl() {
-  // Short scene URL: #scene=N (1-based)
+  // Short scene URL: #scene=N (1-based, scoped to the active bank)
   const sceneMatch = location.hash.match(/^#scene=(\d+)$/);
   if (sceneMatch) {
     const slot = parseInt(sceneMatch[1], 10) - 1;
-    const stored = localStorage.getItem(SCENE_KEY(slot));
+    const stored = localStorage.getItem(sceneKey(getActiveBankId(), slot));
     if (!stored) return { sceneSlot: slot, layers: [], ui: {} };
-    try {
-      const payload = JSON.parse(decodeURIComponent(atob(stored)));
-      const data = Array.isArray(payload) ? { layers: payload } : payload;
-      return { layers: data.layers ?? [], ui: data.ui ?? {}, sceneSlot: slot };
-    } catch {
-      return { sceneSlot: slot, layers: [], ui: {} };
-    }
+    const data = decodeEncodedScene(stored);
+    if (!data) return { sceneSlot: slot, layers: [], ui: {} };
+    return { layers: data.layers ?? [], ui: data.ui ?? {}, sceneSlot: slot };
   }
 
   // Compressed state: #z=...
