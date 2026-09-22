@@ -161,6 +161,17 @@ function getContentEncoded() {
 
 const decodeStoredScene = decodeEncodedScene;
 
+// Accepts either plain JSON (current clipboard format) or legacy base64 (older
+// copies, scene slots, share-URL fragments).
+function parseSceneText(text) {
+  if (!text) return null;
+  try {
+    const payload = JSON.parse(text);
+    return Array.isArray(payload) ? { layers: payload } : payload;
+  } catch {}
+  return decodeStoredScene(text);
+}
+
 function injectBlinkStyle() {
   if (document.getElementById('scene-blink-style')) return;
   const style = document.createElement('style');
@@ -740,7 +751,8 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
   copyBtn.textContent = 'Copy';
   copyBtn.style.cssText = btnBaseStyle;
   copyBtn.addEventListener('click', async () => {
-    _clipboard = getContentEncoded();
+    const decoded = decodeStoredScene(getContentEncoded());
+    _clipboard = JSON.stringify(decoded, null, 2);
     try { await navigator.clipboard.writeText(_clipboard); } catch {}
     refreshSceneButtons();
     showSuccess('Scene copied to clipboard');
@@ -750,16 +762,16 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
   _pasteSceneBtn.textContent = 'Paste';
   _pasteSceneBtn.style.cssText = btnBaseStyle;
   _pasteSceneBtn.addEventListener('click', async () => {
-    let encoded = _clipboard;
+    let text = _clipboard;
     try {
-      const text = await navigator.clipboard.readText();
-      if (text) encoded = text;
+      const clip = await navigator.clipboard.readText();
+      if (clip) text = clip;
     } catch {}
-    if (!encoded) return;
+    if (!text) return;
     if (getLayers().length > 0 && !confirm('Are you sure?')) return;
-    const data = decodeStoredScene(encoded);
+    const data = parseSceneText(text);
     if (!data) { showWarning('Nothing valid to paste'); return; }
-    _clipboard = encoded;
+    _clipboard = text;
     applyState(deserializeLayers(data.layers ?? data));
     rebuild();
     refreshSceneButtons();
