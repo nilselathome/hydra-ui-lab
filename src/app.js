@@ -69,9 +69,9 @@ setTimeout(async () => {
     // use that instead of the visitor's own saved audio prefs.
     uiState = previewPreset.audio ?? {};
   } else if (!isShareLink) {
-    // Scene slots no longer own audio — ignore any legacy embedded audioTrack/bpm/loop
-    // and apply the global audio/tempo state instead.
-    const { audioTrack, bpm, loopA, loopB, ...rest } = uiState;
+    // Scene slots no longer own audio — ignore any legacy embedded audioTrack/loop
+    // and apply the global audio state instead.
+    const { audioTrack, loopA, loopB, ...rest } = uiState;
     uiState = { ...rest, ...(loadGlobalAudioState() ?? {}) };
   }
 
