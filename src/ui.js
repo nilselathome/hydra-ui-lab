@@ -1452,6 +1452,14 @@ function hexToRgb(hex) {
 
 function addTextControls(folder, layer) {
   const content = folder.element.querySelector('.tp-fldv_c') ?? folder.element;
+  // Tweakpane inserts each new blade at its own internally-tracked index —
+  // it has no idea about raw DOM nodes we appendChild ourselves, so any
+  // blade added to this folder *after* this call (Layer/Blend/params/...)
+  // would otherwise get spliced in ahead of these rows regardless of when we
+  // appended them. Building everything into one wrapper lets the caller move
+  // it into place with a plain DOM `.before()`/`.after()` once every blade
+  // for this layer exists, sidestepping that entirely.
+  const wrap = document.createElement('div');
 
   const sharedInputStyle = `
     background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);
@@ -1474,7 +1482,7 @@ function addTextControls(folder, layer) {
     save();
   });
   textRow.appendChild(textInput);
-  content.appendChild(textRow);
+  wrap.appendChild(textRow);
 
   // Font family selector
   const fontRow = document.createElement('div');
@@ -1498,7 +1506,7 @@ function addTextControls(folder, layer) {
     save();
   });
   fontRow.append(fontLabel, fontSelect);
-  content.appendChild(fontRow);
+  wrap.appendChild(fontRow);
 
   // Color picker — opens the browser's native color selector
   const colorRow = document.createElement('div');
@@ -1520,7 +1528,10 @@ function addTextControls(folder, layer) {
     save();
   });
   colorRow.append(colorLabel, colorInput);
-  content.appendChild(colorRow);
+  wrap.appendChild(colorRow);
+
+  content.appendChild(wrap);
+  return wrap;
 }
 
 // ── Three.js code editor ──────────────────────────────────────────────────────
@@ -1875,10 +1886,6 @@ function buildLayersUI() {
     // Visibility toggle
     f.addBinding(layer, 'visible', { label: 'Visible' }).on('change', onChange);
 
-    // The actual text content is the thing you look for first on a text layer —
-    // keep it right up top instead of buried under params.
-    if (layer.type === 'text') addTextControls(f, layer);
-
     // Layer controls
     const controls = f.addFolder({ title: 'Layer', expanded: true });
     controls.addButton({ title: '⧉ Duplicate' }).on('click', () => {
@@ -1913,7 +1920,7 @@ function buildLayersUI() {
         .on('change', onChange);
     }
 
-    // Type-specific media controls (text's own controls moved up top — see above)
+    // Type-specific media controls
     if (layer.type === 'img')   addImageDropZone(f, layer);
     if (layer.type === 'glsl')  addGlslEditor(f, layer);
     if (layer.type === 'three') addThreeEditor(f, layer);
@@ -2076,6 +2083,14 @@ function buildLayersUI() {
       layer.mods.push(createMod());
       rebuild();
     });
+
+    // Build text controls last (every other blade for this layer must already
+    // exist — see the comment in addTextControls), then move the whole thing
+    // to sit right below Visible, above the Layer controls folder.
+    if (layer.type === 'text') {
+      const textControls = addTextControls(f, layer);
+      controls.element.before(textControls);
+    }
   });
 
   requestAnimationFrame(() => { if (uiContainer) uiContainer.scrollTop = scrollTop; });
