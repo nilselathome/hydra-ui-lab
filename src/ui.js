@@ -1198,6 +1198,113 @@ function showAutoplayOverlay() {
   document.body.appendChild(overlay);
 }
 
+// ── Preset image picker (thumbnail grid dialog) ────────────────────────────
+// One shared overlay reused across all image layers — built lazily on first
+// open, rebound with a fresh onPick callback + current-selection highlight
+// each time it's opened, rather than rebuilt on every layer-panel rebuild.
+let _presetPickerEl    = null;
+let _presetPickerCells = null; // name → { cell, img }
+let _presetPickerOnPick = null;
+
+function ensurePresetPicker() {
+  if (_presetPickerEl) return _presetPickerEl;
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = `
+    position: fixed; inset: 0; z-index: 100000;
+    background: rgba(0,0,0,0.75);
+    display: none; align-items: center; justify-content: center;
+  `;
+
+  const dialog = document.createElement('div');
+  dialog.style.cssText = `
+    background: rgba(24,24,24,0.98); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px; padding: 12px; width: min(560px, 92vw);
+    max-height: 80vh; display: flex; flex-direction: column; gap: 8px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+  `;
+
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex; align-items:center; justify-content:space-between;';
+  const title = document.createElement('span');
+  title.textContent = 'Preset Images';
+  title.style.cssText = 'font-size:12px; font-family:inherit; color:rgba(255,255,255,0.75); font-weight:600;';
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = '✕';
+  closeBtn.style.cssText = `
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 2px; color: rgba(255,255,255,0.7); font-size: 11px;
+    font-family: inherit; padding: 3px 7px; cursor: pointer;
+  `;
+  closeBtn.addEventListener('click', closePresetPicker);
+  header.append(title, closeBtn);
+
+  const grid = document.createElement('div');
+  grid.style.cssText = `
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    gap: 8px; overflow-y: auto; padding: 2px;
+  `;
+
+  _presetPickerCells = new Map();
+  PRESET_IMAGES.forEach(name => {
+    const cell = document.createElement('div');
+    cell.style.cssText = 'cursor:pointer; display:flex; flex-direction:column; gap:3px;';
+
+    const img = document.createElement('img');
+    img.src = `${import.meta.env.BASE_URL}${name}`;
+    img.loading = 'lazy';
+    img.style.cssText = `
+      width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 3px;
+      border: 2px solid rgba(255,255,255,0.1); transition: border-color 0.1s;
+    `;
+    cell.addEventListener('mouseenter', () => { if (img.dataset.selected !== '1') img.style.borderColor = 'rgba(255,255,255,0.6)'; });
+    cell.addEventListener('mouseleave', () => { if (img.dataset.selected !== '1') img.style.borderColor = 'rgba(255,255,255,0.1)'; });
+
+    const label = document.createElement('span');
+    label.textContent = name;
+    label.style.cssText = `
+      font-size: 8px; font-family: inherit; color: rgba(255,255,255,0.4);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center;
+    `;
+
+    cell.addEventListener('click', () => {
+      _presetPickerOnPick?.(name);
+      closePresetPicker();
+    });
+
+    cell.append(img, label);
+    grid.appendChild(cell);
+    _presetPickerCells.set(name, img);
+  });
+
+  dialog.append(header, grid);
+  overlay.appendChild(dialog);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closePresetPicker(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && overlay.style.display !== 'none') closePresetPicker();
+  });
+
+  document.body.appendChild(overlay);
+  _presetPickerEl = overlay;
+  return overlay;
+}
+
+function openPresetPicker(currentName, onPick) {
+  const overlay = ensurePresetPicker();
+  _presetPickerOnPick = onPick;
+  _presetPickerCells.forEach((img, name) => {
+    const selected = name === currentName;
+    img.dataset.selected = selected ? '1' : '0';
+    img.style.borderColor = selected ? 'rgba(120,190,255,0.9)' : 'rgba(255,255,255,0.1)';
+  });
+  overlay.style.display = 'flex';
+}
+
+function closePresetPicker() {
+  if (_presetPickerEl) _presetPickerEl.style.display = 'none';
+  _presetPickerOnPick = null;
+}
+
 function addImageDropZone(folder, layer) {
   const content = folder.element.querySelector('.tp-fldv_c') ?? folder.element;
 
@@ -1220,37 +1327,28 @@ function addImageDropZone(folder, layer) {
 
   if (!layer._hydraSource) { content.appendChild(zone); return; }
 
-  // Preset image select — list is generated at build/dev time from public/ (see vite.config.js)
-  const presetSelect = document.createElement('select');
-  presetSelect.style.cssText = `
-    width: calc(100% - 8px); margin: 4px 4px 0; box-sizing: border-box;
+  // Preset images — thumbnail grid dialog. List is generated at build/dev
+  // time from public/ (see vite.config.js).
+  const presetBtn = document.createElement('button');
+  presetBtn.textContent = 'Browse preset images…';
+  presetBtn.style.cssText = `
+    display: block; width: calc(100% - 8px); margin: 4px 4px 0; box-sizing: border-box;
     background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);
     border-radius: 2px; color: #fff; font-size: 10px; font-family: inherit;
-    padding: 4px 6px; outline: none; cursor: pointer;
+    padding: 5px 6px; outline: none; cursor: pointer;
   `;
-  const blankOpt = document.createElement('option');
-  blankOpt.value = '';
-  blankOpt.textContent = '— preset images —';
-  presetSelect.appendChild(blankOpt);
-  PRESET_IMAGES.forEach(name => {
-    const opt = document.createElement('option');
-    opt.value = name;
-    opt.textContent = name;
-    if (layer.imgName === name) opt.selected = true;
-    presetSelect.appendChild(opt);
+  presetBtn.addEventListener('click', () => {
+    openPresetPicker(layer.imgName, (name) => {
+      const url = `${import.meta.env.BASE_URL}${name}`;
+      layer.imgUrl  = url;
+      layer.imgName = name;
+      layer._hydraSource.initImage(url);
+      zone.textContent = `✓ ${name}`;
+      render(getLayers());
+      save();
+    });
   });
-  presetSelect.addEventListener('change', () => {
-    const name = presetSelect.value;
-    if (!name) return;
-    const url = `${import.meta.env.BASE_URL}${name}`;
-    layer.imgUrl  = url;
-    layer.imgName = name;
-    layer._hydraSource.initImage(url);
-    zone.textContent = `✓ ${name}`;
-    render(getLayers());
-    save();
-  });
-  content.appendChild(presetSelect);
+  content.appendChild(presetBtn);
 
   // URL input
   const urlRow = document.createElement('div');
@@ -1292,7 +1390,6 @@ function addImageDropZone(folder, layer) {
     } catch (_) { /* cross-origin or network failure — fall back to direct URL */ }
     layer._hydraSource.initImage(loadUrl);
     zone.textContent = `✓ ${url.split('/').pop() || url}`;
-    presetSelect.value = '';
     render(getLayers());
     save();
   };
@@ -1317,7 +1414,6 @@ function addImageDropZone(folder, layer) {
     layer.imgName = file.name;
     layer._hydraSource.initImage(URL.createObjectURL(file));
     zone.textContent = `✓ ${file.name}`;
-    presetSelect.value = '';
     render(getLayers());
     save();
   };
