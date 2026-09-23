@@ -1772,9 +1772,31 @@ function buildLayersUI() {
     const f = layersPane.addFolder({ title: layer.name, expanded: layer._expanded });
     f.on('fold', (ev) => { layer._expanded = ev.expanded; save(); });
     addCollapseAllCtrl(f);
+    // Distinguishes top-level layer folders from nested transform/mod/animate
+    // folders, which share the same Tweakpane folder styling otherwise.
+    f.element.querySelector('.tp-fldv_b')?.classList.add('hydra-layer-title');
 
     // Visibility toggle
     f.addBinding(layer, 'visible', { label: 'Visible' }).on('change', onChange);
+
+    // Layer controls
+    const controls = f.addFolder({ title: 'Layer', expanded: true });
+    if (!atFront) {
+      controls.addButton({ title: '▲ Move Up' }).on('click', () => {
+        moveLayer(layer.id, 1);
+        rebuild();
+      });
+    }
+    if (!isBase) {
+      controls.addButton({ title: '▼ Move Down' }).on('click', () => {
+        moveLayer(layer.id, -1);
+        rebuild();
+      });
+    }
+    controls.addButton({ title: '✕ Remove' }).on('click', () => {
+      removeLayer(layer.id);
+      rebuild();
+    });
 
     // Blend + opacity (not relevant for the base layer)
     if (!isBase) {
@@ -1949,25 +1971,6 @@ function buildLayersUI() {
 
     f.addButton({ title: '+ Add Modulation' }).on('click', () => {
       layer.mods.push(createMod());
-      rebuild();
-    });
-
-    // Layer controls
-    const controls = f.addFolder({ title: 'Layer', expanded: true });
-    if (!atFront) {
-      controls.addButton({ title: '▲ Move Forward' }).on('click', () => {
-        moveLayer(layer.id, 1);
-        rebuild();
-      });
-    }
-    if (!isBase) {
-      controls.addButton({ title: '▼ Move Back' }).on('click', () => {
-        moveLayer(layer.id, -1);
-        rebuild();
-      });
-    }
-    controls.addButton({ title: '✕ Remove' }).on('click', () => {
-      removeLayer(layer.id);
       rebuild();
     });
   });
