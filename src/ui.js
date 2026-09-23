@@ -1875,6 +1875,10 @@ function buildLayersUI() {
     // Visibility toggle
     f.addBinding(layer, 'visible', { label: 'Visible' }).on('change', onChange);
 
+    // The actual text content is the thing you look for first on a text layer —
+    // keep it right up top instead of buried under params.
+    if (layer.type === 'text') addTextControls(f, layer);
+
     // Layer controls
     const controls = f.addFolder({ title: 'Layer', expanded: true });
     controls.addButton({ title: '⧉ Duplicate' }).on('click', () => {
@@ -1909,9 +1913,8 @@ function buildLayersUI() {
         .on('change', onChange);
     }
 
-    // Type-specific media controls
+    // Type-specific media controls (text's own controls moved up top — see above)
     if (layer.type === 'img')   addImageDropZone(f, layer);
-    if (layer.type === 'text')  addTextControls(f, layer);
     if (layer.type === 'glsl')  addGlslEditor(f, layer);
     if (layer.type === 'three') addThreeEditor(f, layer);
 
