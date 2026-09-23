@@ -1,6 +1,7 @@
 import { getLayers, applyState, reloadThree } from './layers.js';
 import { render } from './engine.js';
 import { initUI } from './ui.js';
+import { registerCustomEffects } from './layerDefs.js';
 import {
   loadFromUrl, deserializeLayers, loadGlobalAudioState,
   loadPresetBank, decodeEncodedScene, sceneKey, getActiveBankId, showWarning,
@@ -13,6 +14,7 @@ canvas.height = window.innerHeight * dpr;
 
 // makeGlobal: true injects osc, shape, voronoi, noise, gradient, src, o0-o3, etc. into window
 new Hydra({ canvas, detectAudio: false, makeGlobal: true, pb: true });
+registerCustomEffects(); // chroma/scanlines/grain glsl — needs Hydra's globals, must run before any layer using them builds
 
 // Hydra needs a tick before the GL context is ready to accept chains
 setTimeout(async () => {

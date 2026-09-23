@@ -226,14 +226,85 @@ export function getLayers() {
   return layers;
 }
 
-// ── Marquee scroll loop ───────────────────────────────────────────────────────
-// Drives per-frame canvas redraws for text layers with scrollSpd != 0.
-// Hydra re-reads dynamic sources every frame, so just keeping the canvas
-// up-to-date here is enough — no Hydra chain rebuild needed.
+// ── Marquee scroll / scramble loop ──────────────────────────────────────────
+// Drives per-frame canvas redraws for text layers with scrollSpd != 0 or
+// scrambleIn/scrambleOut > 0. Hydra re-reads dynamic sources every frame, so
+// just keeping the canvas up-to-date here is enough — no Hydra chain rebuild
+// needed.
 
 let _rafId     = null;
 let _lastTs    = 0;
-const _offsets = new Map(); // layerId → accumulated CSS-pixel offset
+const _offsets = new Map(); // layerId → accumulated CSS-pixel offset (marquee)
+const _scrambleElapsed = new Map(); // layerId → accumulated seconds (scramble)
+
+const SCRAMBLE_CHARS = '!"#$%&\'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~';
+function _scrambleChar() {
+  return SCRAMBLE_CHARS[(Math.random() * SCRAMBLE_CHARS.length) | 0];
+}
+
+function _isScrambling(layer) {
+  return layer.params.scrambleIn > 0 || layer.params.scrambleOut > 0;
+}
+
+// Per-character reveal thresholds (0..1), regenerated whenever the text changes.
+// A character's "in" threshold also doubles (mirrored) as its "out" threshold,
+// so characters that settle first are the last to dissolve — a symmetric ripple.
+function _ensureScrambleSeeds(layer) {
+  const text = layer.textContent ?? '';
+  if (layer._scrambleSeedText === text && layer._scrambleSeeds) return;
+  layer._scrambleSeedText = text;
+  layer._scrambleSeeds = Array.from(text, () => Math.random());
+}
+
+function _drawScramble(layer, elapsed) {
+  const canvas = layer._canvas;
+  if (!canvas) return;
+  const p    = layer.params;
+  const text = layer.textContent ?? '';
+  const seeds = layer._scrambleSeeds ?? [];
+  const dpr  = layer._canvasDpr || 1;
+  const logW = canvas.width  / dpr;
+  const logH = canvas.height / dpr;
+  const ctx  = canvas.getContext('2d');
+
+  const inDur   = Math.max(p.scrambleIn, 0);
+  const holdDur = Math.max(p.scrambleHold, 0);
+  const outDur  = Math.max(p.scrambleOut, 0);
+  const cycle   = inDur + holdDur + outDur;
+  const t       = cycle > 0 ? elapsed % cycle : 0;
+  const inPhase   = t < inDur;
+  const holdPhase = !inPhase && t < inDur + holdDur;
+
+  let out = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === ' ') { out += ch; continue; }
+    const seed = seeds[i] ?? 0.5;
+    let resolved;
+    if (inPhase) {
+      // Resolving: each char reveals once elapsed-in-phase crosses its threshold.
+      resolved = inDur === 0 ? true : (t / inDur) >= seed;
+    } else if (holdPhase) {
+      // Holding: fully settled on the original text.
+      resolved = true;
+    } else {
+      // Dissolving: mirrored threshold, so early-resolvers hold longest.
+      const localT = outDur === 0 ? 1 : (t - inDur - holdDur) / outDur;
+      resolved = localT < (1 - seed);
+    }
+    out += resolved ? ch : _scrambleChar();
+  }
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.scale(dpr, dpr);
+  ctx.font      = `${Math.round(p.size)}px "${layer.fontFamily}"`;
+  ctx.fillStyle = `rgb(${Math.round(p.r * 255)},${Math.round(p.g * 255)},${Math.round(p.b * 255)})`;
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(out, logW * p.x, logH * p.y);
+  ctx.restore();
+}
 
 function _drawMarquee(layer, offsetCss) {
   const canvas = layer._canvas;
@@ -275,10 +346,19 @@ function _tick(ts) {
   const dt = Math.min((ts - _lastTs) / 1000, 0.1); // cap at 100 ms to avoid jump on tab-focus
   _lastTs = ts;
 
-  const animated = layers.filter(l => l.type === 'text' && l.params.scrollSpd !== 0);
-  if (animated.length === 0) { _rafId = null; return; }
+  // A layer that's scrambling takes priority over marquee scroll — both are
+  // full-canvas redraws and combining them isn't worth the complexity.
+  const scrambling = layers.filter(l => l.type === 'text' && _isScrambling(l));
+  const scrolling  = layers.filter(l => l.type === 'text' && l.params.scrollSpd !== 0 && !_isScrambling(l));
+  if (scrambling.length === 0 && scrolling.length === 0) { _rafId = null; return; }
 
-  animated.forEach(layer => {
+  scrambling.forEach(layer => {
+    const elapsed = (_scrambleElapsed.get(layer.id) || 0) + dt;
+    _scrambleElapsed.set(layer.id, elapsed);
+    _drawScramble(layer, elapsed);
+  });
+
+  scrolling.forEach(layer => {
     const canvas = layer._canvas;
     if (!canvas) return;
     const dpr  = layer._canvasDpr || 1;
@@ -301,7 +381,7 @@ function _tick(ts) {
   _rafId = requestAnimationFrame(_tick);
 }
 
-function ensureScrollLoop() {
+function ensureTextAnimLoop() {
   if (_rafId !== null) return;
   _lastTs = performance.now();
   _rafId  = requestAnimationFrame(_tick);
@@ -318,9 +398,11 @@ export async function drawTextCanvas(layer) {
   // Web fonts won't render on an offscreen canvas unless explicitly loaded first
   try { await document.fonts.load(fontStr); } catch (_) {}
 
-  if (p.scrollSpd !== 0) {
-    // Hand off to the marquee loop — it reads params live each frame
-    ensureScrollLoop();
+  _ensureScrambleSeeds(layer);
+
+  if (_isScrambling(layer) || p.scrollSpd !== 0) {
+    // Hand off to the animation loop — it reads params live each frame
+    ensureTextAnimLoop();
     return;
   }
 
@@ -447,6 +529,7 @@ export function removeLayer(id) {
   if (layer?.type === 'three') destroyThreeLayer(layer);
   if (layer?._hydraSlot != null) freeSlot(layer._hydraSlot);
   _offsets.delete(id);
+  _scrambleElapsed.delete(id);
   layers = layers.filter(l => l.id !== id);
 }
 

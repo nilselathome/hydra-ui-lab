@@ -20,6 +20,17 @@
       max-height: calc(100vh - 24px);
       overflow-y: auto;
       /* Tweakpane renders inside here */
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* ...but keep selection working in actual text-entry fields (Tweakpane's
+       own number/text inputs included — they're <input type="text"> too). */
+    #ui input[type="text"],
+    #ui input[type="url"],
+    #ui textarea {
+      user-select: text;
+      -webkit-user-select: text;
     }
   </style>
 </head>

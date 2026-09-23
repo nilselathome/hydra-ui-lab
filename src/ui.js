@@ -784,6 +784,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     refreshSceneButtons();
     refreshSaveBtn();
     saveSceneToUrl(activeSlot);
+    showSuccess(`Saved to scene ${activeSlot + 1}`);
   });
 
   _clearSceneBtn = document.createElement('button');
@@ -1343,6 +1344,16 @@ const TEXT_FONTS = [
   'PT Sans', 'Press Start 2P', 'Roboto Mono', 'Source Code Pro', 'Inconsolata',
 ];
 
+function rgbToHex(r, g, b) {
+  const toHex = (v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return { r: ((n >> 16) & 255) / 255, g: ((n >> 8) & 255) / 255, b: (n & 255) / 255 };
+}
+
 function addTextControls(folder, layer) {
   const content = folder.element.querySelector('.tp-fldv_c') ?? folder.element;
 
@@ -1392,6 +1403,28 @@ function addTextControls(folder, layer) {
   });
   fontRow.append(fontLabel, fontSelect);
   content.appendChild(fontRow);
+
+  // Color picker — opens the browser's native color selector
+  const colorRow = document.createElement('div');
+  colorRow.style.cssText = 'display:flex; align-items:center; gap:4px; margin: 4px 4px 2px;';
+  const colorLabel = document.createElement('span');
+  colorLabel.textContent = 'Color';
+  colorLabel.style.cssText = 'font-size:10px; font-family:inherit; color:rgba(255,255,255,0.5); flex-shrink:0;';
+  const colorInput = document.createElement('input');
+  colorInput.type = 'color';
+  colorInput.value = rgbToHex(layer.params.r, layer.params.g, layer.params.b);
+  colorInput.style.cssText = `flex:1; height:22px; cursor:pointer; ${sharedInputStyle}`;
+  colorInput.addEventListener('input', async () => {
+    const { r, g, b } = hexToRgb(colorInput.value);
+    layer.params.r = r;
+    layer.params.g = g;
+    layer.params.b = b;
+    await drawTextCanvas(layer);
+    render(getLayers());
+    save();
+  });
+  colorRow.append(colorLabel, colorInput);
+  content.appendChild(colorRow);
 }
 
 // ── Three.js code editor ──────────────────────────────────────────────────────
@@ -1762,6 +1795,7 @@ function buildLayersUI() {
 
     // Type-specific params
     LAYER_TYPES[layer.type].params.forEach(p => {
+      if (p.hidden) return;
       const opts = { label: p.label, min: p.min, max: p.max };
       if (p.step) opts.step = p.step;
       f.addBinding(layer.params, p.key, opts).on('change', onChange);
