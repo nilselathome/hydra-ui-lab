@@ -533,6 +533,42 @@ export function removeLayer(id) {
   layers = layers.filter(l => l.id !== id);
 }
 
+// Applies a plain-data snapshot (as produced by serializeLayer in state.js, or
+// duplicateLayer below) onto a freshly created layer of the matching type.
+function restoreLayerData(layer, data) {
+  layer.visible   = data.visible   ?? true;
+  layer.opacity   = data.opacity   ?? 0.5;
+  layer.blendMode = data.blendMode ?? 'blend';
+  layer._expanded = data._expanded ?? true;
+  Object.assign(layer.params, data.params ?? {});
+  layer.transforms = data.transforms ?? [];
+  layer.mods       = data.mods       ?? [];
+  if (data.type === 'img' && data.imgUrl) {
+    layer.imgUrl  = data.imgUrl;
+    layer.imgName = data.imgName || '';
+    if (data.imgUrl.startsWith('idb:')) {
+      getImage(data.imgUrl).then(blob => {
+        if (blob) layer._hydraSource?.initImage(URL.createObjectURL(blob));
+      });
+    } else {
+      layer._hydraSource?.initImage(data.imgUrl);
+    }
+  }
+  if (data.type === 'text') {
+    layer.textContent = data.textContent ?? 'Text';
+    layer.fontFamily  = data.fontFamily  ?? 'Bebas Neue';
+    drawTextCanvas(layer);
+  }
+  if (data.type === 'glsl') {
+    layer._glslCode = data.glslCode ?? DEFAULT_GLSL;
+    registerGlsl(layer);
+  }
+  if (data.type === 'three') {
+    layer._threeCode = data.threeCode ?? DEFAULT_THREE_CODE;
+    reloadThree(layer);
+  }
+}
+
 export function applyState(dataArray) {
   // Clear existing state
   layers.forEach(l => { if (l.type === 'three') destroyThreeLayer(l); });
@@ -540,41 +576,7 @@ export function applyState(dataArray) {
   usedSlots.clear();
   nextId = 1;
 
-  dataArray.forEach(data => {
-    const layer = addLayer(data.type);
-    layer.visible   = data.visible   ?? true;
-    layer.opacity   = data.opacity   ?? 0.5;
-    layer.blendMode = data.blendMode ?? 'blend';
-    layer._expanded = data._expanded ?? true;
-    Object.assign(layer.params, data.params ?? {});
-    layer.transforms = data.transforms ?? [];
-    layer.mods       = data.mods       ?? [];
-    if (data.type === 'img' && data.imgUrl) {
-      layer.imgUrl  = data.imgUrl;
-      layer.imgName = data.imgName || '';
-      if (data.imgUrl.startsWith('idb:')) {
-        getImage(data.imgUrl).then(blob => {
-          if (blob) layer._hydraSource?.initImage(URL.createObjectURL(blob));
-        });
-      } else {
-        layer._hydraSource?.initImage(data.imgUrl);
-      }
-    }
-    if (data.type === 'text') {
-      layer.textContent = data.textContent ?? 'Text';
-      layer.fontFamily  = data.fontFamily  ?? 'Bebas Neue';
-      drawTextCanvas(layer);
-    }
-    if (data.type === 'glsl') {
-      layer._glslName = `hydraGlsl_${layer.id}`;
-      layer._glslCode = data.glslCode ?? DEFAULT_GLSL;
-      registerGlsl(layer);
-    }
-    if (data.type === 'three') {
-      layer._threeCode = data.threeCode ?? DEFAULT_THREE_CODE;
-      reloadThree(layer);
-    }
-  });
+  dataArray.forEach(data => restoreLayerData(addLayer(data.type), data));
 }
 
 // dir: 1 = move toward front (higher index), -1 = move toward back (lower index)
@@ -583,4 +585,35 @@ export function moveLayer(id, dir) {
   const j = i + dir;
   if (j < 0 || j >= layers.length) return;
   [layers[i], layers[j]] = [layers[j], layers[i]];
+}
+
+// Inserts a copy of the layer directly above the original (same params,
+// transforms, mods, and type-specific media/code) — a fresh img/text slot is
+// allocated if one is free, same as any other new layer.
+export function duplicateLayer(id) {
+  const idx = layers.findIndex(l => l.id === id);
+  if (idx === -1) return null;
+  const source = layers[idx];
+
+  const data = {
+    type: source.type,
+    visible: source.visible,
+    opacity: source.opacity,
+    blendMode: source.blendMode,
+    _expanded: source._expanded,
+    params: structuredClone(source.params),
+    transforms: structuredClone(source.transforms),
+    mods: structuredClone(source.mods),
+  };
+  if (source.type === 'img')   { data.imgUrl = source.imgUrl; data.imgName = source.imgName; }
+  if (source.type === 'text')  { data.textContent = source.textContent; data.fontFamily = source.fontFamily; }
+  if (source.type === 'glsl')  data.glslCode  = source._glslCode;
+  if (source.type === 'three') data.threeCode = source._threeCode;
+
+  const copy = addLayer(source.type); // appended at the end for now
+  restoreLayerData(copy, data);
+
+  layers = layers.filter(l => l.id !== copy.id);
+  layers.splice(idx + 1, 0, copy);
+  return copy;
 }

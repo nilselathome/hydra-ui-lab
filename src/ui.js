@@ -1,6 +1,6 @@
 import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
 import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
-import { getLayers, addLayer, removeLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, applyState, registerGlsl, reloadThree, THREE_PRESETS } from './layers.js';
+import { getLayers, addLayer, removeLayer, duplicateLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, applyState, registerGlsl, reloadThree, THREE_PRESETS } from './layers.js';
 import { render } from './engine.js';
 import {
   saveToUrl, saveSceneToUrl, buildShareUrl, showWarning, showSuccess, encodeState, deserializeLayers,
@@ -1877,6 +1877,10 @@ function buildLayersUI() {
 
     // Layer controls
     const controls = f.addFolder({ title: 'Layer', expanded: true });
+    controls.addButton({ title: '⧉ Duplicate' }).on('click', () => {
+      duplicateLayer(layer.id);
+      rebuild();
+    });
     if (!atFront) {
       controls.addButton({ title: '▲ Move Up' }).on('click', () => {
         moveLayer(layer.id, 1);

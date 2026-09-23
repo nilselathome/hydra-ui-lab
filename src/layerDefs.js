@@ -229,7 +229,10 @@ export const MOD_FNS = {
   modulate:       { label: 'Displace',     min: -1,  max: 1,  step: 0.01 },
   modulateHue:    { label: 'Hue',          min: -1,  max: 1,  step: 0.01 },
   modulateScale:  { label: 'Scale',        min: -2,  max: 2,  step: 0.01 },
-  modulateRotate: { label: 'Warp Rotate',  min: -1,  max: 1,  step: 0.01 },
+  // Hydra's modulateRotate uses this as a radians-per-unit multiplier, so ±1
+  // only ever swings ~1 radian (57°) — well short of a full turn. ±20 allows
+  // a bit over 3 full rotations (2π ≈ 6.28) in either direction.
+  modulateRotate: { label: 'Warp Rotate',  min: -20, max: 20, step: 0.05 },
   modulateKaleid: { label: 'Warp Kaleid',  min: 2,   max: 20, step: 1    },
 };
 
