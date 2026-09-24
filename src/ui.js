@@ -35,6 +35,10 @@ let audioLibraryTrack  = null; // filename of active library track, or null
 // to module scope.
 let restartScenePlayer = () => {};
 
+// Set by initScenesPane once goToScene exists — lets the ArrowLeft/ArrowRight
+// hotkeys (see initUI) step the active scene without hoisting that state.
+let stepScene = () => {};
+
 // ── UI show/hide (Tab) ──────────────────────────────────────────────────────
 // Lets a performer tuck the whole Tweakpane stack out of the way for a clean
 // screen capture. A floating indicator survives the hide so an accidental Tab
@@ -173,6 +177,7 @@ let previewBank   = null;   // { name, scenes: [...] } when previewing a read-on
 let activeSlot    = null;   // slot index (0-based), or null
 let _sceneButtons = [];     // DOM button elements, index === slot
 let _bankSelect    = null;
+let _copySceneBtn  = null;
 let _saveSceneBtn  = null;
 let _clearSceneBtn = null;
 let _pasteSceneBtn = null;
@@ -686,6 +691,16 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     refreshSaveBtn();
   }
 
+  // Hooked up to the ArrowLeft/ArrowRight hotkeys (see initUI) — steps by one
+  // slot, clamped at the bank's edges rather than wrapping. Works in preset
+  // previews too, for flipping through a showcase link's scenes.
+  stepScene = (delta) => {
+    if (activeSlot === null) return;
+    const target = activeSlot + delta;
+    if (target < 0 || target >= SCENE_COUNT) return;
+    goToScene(target);
+  };
+
   function switchBank(id, { force = false } = {}) {
     if (isPreview() || id === null || id === activeBankId) { refreshBankSelect(); return; }
     if (!force) {
@@ -920,10 +935,10 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
   const btnRow2 = document.createElement('div');
   btnRow2.style.cssText = btnRowStyle;
 
-  const copyBtn = document.createElement('button');
-  copyBtn.textContent = 'Copy';
-  copyBtn.style.cssText = btnBaseStyle;
-  copyBtn.addEventListener('click', async () => {
+  _copySceneBtn = document.createElement('button');
+  _copySceneBtn.textContent = 'Copy';
+  _copySceneBtn.style.cssText = btnBaseStyle;
+  _copySceneBtn.addEventListener('click', async () => {
     const decoded = decodeStoredScene(getContentEncoded());
     _clipboard = JSON.stringify(decoded, null, 2);
     try { await navigator.clipboard.writeText(_clipboard); } catch {}
@@ -986,7 +1001,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     else armSaveAs();
   });
 
-  btnRow2.appendChild(copyBtn);
+  btnRow2.appendChild(_copySceneBtn);
   btnRow2.appendChild(_pasteSceneBtn);
   btnRow2.appendChild(_saveSceneBtn);
   btnRow2.appendChild(_saveAsBtn);
@@ -1084,6 +1099,36 @@ export function initUI(container, uiState = {}, initialSceneSlot = null, preview
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
       e.preventDefault();
       setUiVisible(!uiVisible);
+      return;
+    }
+    // ArrowLeft/ArrowRight — step the active scene by one slot. Skipped in
+    // text fields/selects/sliders, where the arrows already have a job
+    // (cursor movement, changing a range/select value).
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      const tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
+      e.preventDefault();
+      stepScene(e.key === 'ArrowLeft' ? -1 : 1);
+      return;
+    }
+    // Ctrl+S / Ctrl+Shift+S — same as clicking Save/Save As (triggers the
+    // real buttons, so behavior stays identical, arm-then-pick-a-slot flow
+    // included). Not guarded by focused element, same reasoning as Ctrl+R:
+    // nobody wants the browser's own Save-Page dialog.
+    if (e.ctrlKey && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      if (e.shiftKey) _saveAsBtn?.click();
+      else _saveSceneBtn?.click();
+      return;
+    }
+    // Ctrl+C / Ctrl+V — same as clicking Copy/Paste. Guarded by focused
+    // element so normal text copy/paste in inputs/selects keeps working.
+    if (e.ctrlKey && (e.key.toLowerCase() === 'c' || e.key.toLowerCase() === 'v')) {
+      const tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
+      e.preventDefault();
+      if (e.key.toLowerCase() === 'c') _copySceneBtn?.click();
+      else _pasteSceneBtn?.click();
     }
   });
 
