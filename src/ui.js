@@ -1249,12 +1249,12 @@ function ensurePresetPicker() {
   `;
 
   _presetPickerCells = new Map();
-  PRESET_IMAGES.forEach(name => {
+  PRESET_IMAGES.forEach(({ name, thumb }) => {
     const cell = document.createElement('div');
     cell.style.cssText = 'cursor:pointer; display:flex; flex-direction:column; gap:3px;';
 
     const img = document.createElement('img');
-    img.src = `${import.meta.env.BASE_URL}${name}`;
+    img.src = `${import.meta.env.BASE_URL}${thumb}`;
     img.loading = 'lazy';
     img.style.cssText = `
       width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 3px;

@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Generated preset-image thumbnails (see vite.config.js presetImagesPlugin)
+public/thumbs
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
