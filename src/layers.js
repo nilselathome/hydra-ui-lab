@@ -422,6 +422,56 @@ export async function drawTextCanvas(layer) {
   ctx.restore();
 }
 
+// ── Text bank auto-advance (poem/speech mode) ───────────────────────────────
+// Cycles a text layer's textBank on a timer, mirroring the Scenes pane's
+// player: a uniform interval, or comma-separated per-step custom durations
+// that override it. layer.textBankPlaying is persisted (see state.js) so a
+// reload/share-link resumes playback rather than requiring Play again.
+const _textBankTimers = new Map(); // layerId → timeout handle
+
+function textBankDurationForStep(layer, step) {
+  const list = (layer.textBankTimings ?? '')
+    .split(',')
+    .map(s => parseFloat(s.trim()))
+    .filter(n => isFinite(n) && n > 0);
+  return list.length ? list[step % list.length] : (layer.textBankInterval ?? 5);
+}
+
+export function setTextBankIndex(layer, index) {
+  const bank = layer.textBank ?? [];
+  if (bank.length === 0) return;
+  layer.textBankIndex = ((index % bank.length) + bank.length) % bank.length;
+  layer.textContent = bank[layer.textBankIndex] ?? '';
+  drawTextCanvas(layer);
+}
+
+export function isTextBankPlaying(layer) {
+  return !!layer.textBankPlaying;
+}
+
+export function stopTextBankPlayer(layer) {
+  const timer = _textBankTimers.get(layer.id);
+  if (timer != null) clearTimeout(timer);
+  _textBankTimers.delete(layer.id);
+  layer.textBankPlaying = false;
+}
+
+export function startTextBankPlayer(layer) {
+  if ((layer.textBank?.length ?? 0) < 2) return;
+  stopTextBankPlayer(layer);
+  layer.textBankPlaying = true;
+  let step = 0;
+  const scheduleNext = () => {
+    const dur = textBankDurationForStep(layer, step++);
+    _textBankTimers.set(layer.id, setTimeout(tick, Math.max(0.1, dur) * 1000));
+  };
+  const tick = () => {
+    setTextBankIndex(layer, layer.textBankIndex + 1);
+    scheduleNext();
+  };
+  scheduleNext();
+}
+
 function defaultModParams(srcType) {
   const p = {};
   LAYER_TYPES[srcType].params.forEach(def => { p[def.key] = def.default; });
@@ -510,6 +560,13 @@ export function addLayer(type, overrides = {}) {
     layer._hydraSource = slot !== null ? window[`s${slot}`] : null;
     layer.textContent = 'Text';
     layer.fontFamily = 'Bebas Neue';
+    // "Text bank" — a poem/speech's worth of lines, switchable by hand or on
+    // an auto-advance timer. textContent above always mirrors the active entry.
+    layer.textBank         = ['Text'];
+    layer.textBankIndex    = 0;
+    layer.textBankInterval = 5;
+    layer.textBankTimings  = '';
+    layer.textBankPlaying  = false;
     const dpr = window.devicePixelRatio || 1;
     const canvas = document.createElement('canvas');
     canvas.width  = Math.round(window.innerWidth  * dpr);
@@ -527,6 +584,7 @@ export function addLayer(type, overrides = {}) {
 export function removeLayer(id) {
   const layer = layers.find(l => l.id === id);
   if (layer?.type === 'three') destroyThreeLayer(layer);
+  if (layer?.type === 'text')  stopTextBankPlayer(layer);
   if (layer?._hydraSlot != null) freeSlot(layer._hydraSlot);
   _offsets.delete(id);
   _scrambleElapsed.delete(id);
@@ -555,9 +613,17 @@ function restoreLayerData(layer, data) {
     }
   }
   if (data.type === 'text') {
-    layer.textContent = data.textContent ?? 'Text';
-    layer.fontFamily  = data.fontFamily  ?? 'Bebas Neue';
+    layer.fontFamily = data.fontFamily ?? 'Bebas Neue';
+    // Older saves have no textBank — synthesize a single-entry one from
+    // textContent so they still load correctly.
+    layer.textBank         = data.textBank?.length ? [...data.textBank] : [data.textContent ?? 'Text'];
+    layer.textBankIndex    = Math.min(Math.max(data.textBankIndex ?? 0, 0), layer.textBank.length - 1);
+    layer.textBankInterval = data.textBankInterval ?? 5;
+    layer.textBankTimings  = data.textBankTimings  ?? '';
+    layer.textContent      = layer.textBank[layer.textBankIndex];
+    layer.textBankPlaying  = false; // set true below if resumed
     drawTextCanvas(layer);
+    if (data.textBankPlaying) startTextBankPlayer(layer);
   }
   if (data.type === 'glsl') {
     layer._glslCode = data.glslCode ?? DEFAULT_GLSL;
@@ -571,7 +637,10 @@ function restoreLayerData(layer, data) {
 
 export function applyState(dataArray) {
   // Clear existing state
-  layers.forEach(l => { if (l.type === 'three') destroyThreeLayer(l); });
+  layers.forEach(l => {
+    if (l.type === 'three') destroyThreeLayer(l);
+    if (l.type === 'text')  stopTextBankPlayer(l);
+  });
   layers = [];
   usedSlots.clear();
   nextId = 1;
@@ -605,8 +674,15 @@ export function duplicateLayer(id) {
     transforms: structuredClone(source.transforms),
     mods: structuredClone(source.mods),
   };
-  if (source.type === 'img')   { data.imgUrl = source.imgUrl; data.imgName = source.imgName; }
-  if (source.type === 'text')  { data.textContent = source.textContent; data.fontFamily = source.fontFamily; }
+  if (source.type === 'img') { data.imgUrl = source.imgUrl; data.imgName = source.imgName; }
+  if (source.type === 'text') {
+    data.fontFamily       = source.fontFamily;
+    data.textBank         = [...source.textBank];
+    data.textBankIndex    = source.textBankIndex;
+    data.textBankInterval = source.textBankInterval;
+    data.textBankTimings  = source.textBankTimings;
+    data.textBankPlaying  = source.textBankPlaying;
+  }
   if (source.type === 'glsl')  data.glslCode  = source._glslCode;
   if (source.type === 'three') data.threeCode = source._threeCode;
 

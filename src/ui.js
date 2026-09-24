@@ -1,6 +1,6 @@
 import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
 import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
-import { getLayers, addLayer, removeLayer, duplicateLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, applyState, registerGlsl, reloadThree, THREE_PRESETS } from './layers.js';
+import { getLayers, addLayer, removeLayer, duplicateLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, setTextBankIndex, isTextBankPlaying, startTextBankPlayer, stopTextBankPlayer, applyState, registerGlsl, reloadThree, THREE_PRESETS } from './layers.js';
 import { render } from './engine.js';
 import {
   saveToUrl, saveSceneToUrl, buildShareUrl, showWarning, showSuccess, encodeState, deserializeLayers,
@@ -1467,7 +1467,33 @@ function addTextControls(folder, layer) {
     padding: 4px 6px; outline: none;
   `;
 
-  // Text content input
+  // Text bank — a poem/speech's worth of lines. The select switches which
+  // entry is "live"; the input below edits whichever one is selected.
+  const bankRow = document.createElement('div');
+  bankRow.style.cssText = 'display:flex; gap:4px; margin: 4px 4px 0;';
+
+  const bankSelect = document.createElement('select');
+  bankSelect.style.cssText = `flex:1; min-width:0; cursor:pointer; ${sharedInputStyle}`;
+
+  const smallBtnStyle = `
+    flex: none; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 2px; color: rgba(255,255,255,0.5); font-size: 10px;
+    font-family: inherit; padding: 3px 8px; cursor: pointer;
+  `;
+  const addEntryBtn = document.createElement('button');
+  addEntryBtn.textContent = '+';
+  addEntryBtn.title = 'Add line after current';
+  addEntryBtn.style.cssText = smallBtnStyle;
+
+  const removeEntryBtn = document.createElement('button');
+  removeEntryBtn.textContent = '✕';
+  removeEntryBtn.title = 'Remove current line';
+  removeEntryBtn.style.cssText = smallBtnStyle;
+
+  bankRow.append(bankSelect, addEntryBtn, removeEntryBtn);
+  wrap.appendChild(bankRow);
+
+  // Text content input — edits layer.textBank[layer.textBankIndex]
   const textRow = document.createElement('div');
   textRow.style.cssText = 'display:flex; gap:4px; margin: 4px 4px 0;';
   const textInput = document.createElement('input');
@@ -1475,14 +1501,57 @@ function addTextControls(folder, layer) {
   textInput.placeholder = 'Enter text…';
   textInput.value = layer.textContent ?? '';
   textInput.style.cssText = `flex: 1; ${sharedInputStyle}`;
+  textRow.appendChild(textInput);
+  wrap.appendChild(textRow);
+
+  function refreshBankSelect() {
+    bankSelect.innerHTML = '';
+    layer.textBank.forEach((entry, i) => {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      const preview = entry.trim() ? entry.trim().slice(0, 28) : '(empty)';
+      opt.textContent = `${i + 1}: ${preview}`;
+      if (i === layer.textBankIndex) opt.selected = true;
+      bankSelect.appendChild(opt);
+    });
+  }
+  refreshBankSelect();
+
   textInput.addEventListener('input', async () => {
     layer.textContent = textInput.value;
+    layer.textBank[layer.textBankIndex] = textInput.value;
+    refreshBankSelect();
     await drawTextCanvas(layer);
     render(getLayers());
     save();
   });
-  textRow.appendChild(textInput);
-  wrap.appendChild(textRow);
+
+  bankSelect.addEventListener('change', async () => {
+    setTextBankIndex(layer, parseInt(bankSelect.value, 10));
+    textInput.value = layer.textContent;
+    render(getLayers());
+    save();
+  });
+
+  addEntryBtn.addEventListener('click', async () => {
+    layer.textBank.splice(layer.textBankIndex + 1, 0, '');
+    setTextBankIndex(layer, layer.textBankIndex + 1);
+    refreshBankSelect();
+    textInput.value = layer.textContent;
+    textInput.focus();
+    render(getLayers());
+    save();
+  });
+
+  removeEntryBtn.addEventListener('click', async () => {
+    if (layer.textBank.length <= 1) return;
+    layer.textBank.splice(layer.textBankIndex, 1);
+    setTextBankIndex(layer, layer.textBankIndex);
+    refreshBankSelect();
+    textInput.value = layer.textContent;
+    render(getLayers());
+    save();
+  });
 
   // Font family selector
   const fontRow = document.createElement('div');
@@ -1529,6 +1598,79 @@ function addTextControls(folder, layer) {
   });
   colorRow.append(colorLabel, colorInput);
   wrap.appendChild(colorRow);
+
+  // Auto-advance through the bank — same interval/custom-timings UX as the
+  // Scenes pane's player (src/ui.js initScenesPane), scoped to this layer.
+  const playerWrap = document.createElement('div');
+  playerWrap.style.cssText = 'margin: 6px 4px 2px; display:flex; flex-direction:column; gap:5px;';
+
+  const playBtn = document.createElement('button');
+  playBtn.style.cssText = `
+    width: 100%; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 2px; color: rgba(255,255,255,0.6); font-size: 10px;
+    font-family: inherit; font-weight: bold; padding: 6px; cursor: pointer;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  `;
+  function updatePlayBtn() {
+    if (isTextBankPlaying(layer)) {
+      playBtn.textContent = '■ Stop';
+      playBtn.style.background  = 'rgba(100,220,130,0.15)';
+      playBtn.style.borderColor = 'rgba(100,220,130,0.5)';
+      playBtn.style.color       = 'rgba(130,240,160,0.9)';
+    } else {
+      playBtn.textContent = '▶ Play';
+      playBtn.style.background  = 'rgba(255,255,255,0.04)';
+      playBtn.style.borderColor = 'rgba(255,255,255,0.1)';
+      playBtn.style.color       = 'rgba(255,255,255,0.6)';
+    }
+  }
+  playBtn.addEventListener('click', () => {
+    if (isTextBankPlaying(layer)) {
+      stopTextBankPlayer(layer);
+    } else {
+      if (layer.textBank.length < 2) { showWarning('Add at least 2 lines to play.'); return; }
+      startTextBankPlayer(layer);
+    }
+    updatePlayBtn();
+    save();
+  });
+
+  const intervalRow = document.createElement('div');
+  intervalRow.style.cssText = 'display:flex; align-items:center; gap:6px;';
+  const intervalLabel = document.createElement('span');
+  intervalLabel.textContent = 'interval';
+  intervalLabel.style.cssText = 'font-size:9px; font-family:monospace; color:rgba(255,255,255,0.3); flex-shrink:0;';
+  const intervalSlider = document.createElement('input');
+  intervalSlider.type = 'range'; intervalSlider.min = '0.5'; intervalSlider.max = '60'; intervalSlider.step = '0.5';
+  intervalSlider.value = String(layer.textBankInterval ?? 5);
+  intervalSlider.style.cssText = 'flex:1; accent-color: rgba(255,255,255,0.6); cursor:pointer; height:3px;';
+  const intervalValue = document.createElement('span');
+  intervalValue.style.cssText = 'font-size:9px; font-family:monospace; color:rgba(255,255,255,0.4); flex-shrink:0; min-width:28px; text-align:right;';
+  intervalValue.textContent = `${intervalSlider.value}s`;
+  intervalSlider.addEventListener('input', () => {
+    intervalValue.textContent = `${intervalSlider.value}s`;
+    layer.textBankInterval = intervalSlider.valueAsNumber;
+    save();
+  });
+  intervalRow.append(intervalLabel, intervalSlider, intervalValue);
+
+  const timingInput = document.createElement('input');
+  timingInput.type = 'text';
+  timingInput.placeholder = 'custom timings (s), comma-separated — overrides interval';
+  timingInput.value = layer.textBankTimings ?? '';
+  timingInput.style.cssText = `
+    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 2px; color: #fff; font-size: 9px; font-family: monospace;
+    padding: 4px 6px; outline: none;
+  `;
+  timingInput.addEventListener('input', () => {
+    layer.textBankTimings = timingInput.value;
+    save();
+  });
+
+  playerWrap.append(playBtn, intervalRow, timingInput);
+  wrap.appendChild(playerWrap);
+  updatePlayBtn();
 
   content.appendChild(wrap);
   return wrap;

@@ -34,8 +34,15 @@ function serializeLayer(layer) {
     _expanded: layer._expanded,
   };
   if (layer.type === 'img')  { out.imgUrl = layer.imgUrl || ''; out.imgName = layer.imgName || ''; }
-  if (layer.type === 'text') out.textContent = layer.textContent ?? '';
-  if (layer.type === 'text') out.fontFamily  = layer.fontFamily  ?? 'Arial';
+  if (layer.type === 'text') {
+    out.textContent      = layer.textContent ?? '';
+    out.fontFamily        = layer.fontFamily  ?? 'Arial';
+    out.textBank          = layer.textBank ?? [layer.textContent ?? ''];
+    out.textBankIndex     = layer.textBankIndex ?? 0;
+    out.textBankInterval  = layer.textBankInterval ?? 5;
+    out.textBankTimings   = layer.textBankTimings ?? '';
+    out.textBankPlaying   = layer.textBankPlaying ?? false;
+  }
   if (layer.type === 'glsl')  out.glslCode  = layer._glslCode  ?? '';
   if (layer.type === 'three') out.threeCode = layer._threeCode ?? '';
   return out;
