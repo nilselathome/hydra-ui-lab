@@ -133,6 +133,14 @@ export function sceneKey(bankId, n) {
   return `hydra-bank-${bankId}-scene-${n}`;
 }
 
+// Small preview image captured off the canvas when a slot is saved (see
+// writeSlotThumb in ui.js) — stored alongside the scene under its own key so
+// clearing/overwriting a slot doesn't have to touch the (much larger) scene
+// payload just to drop the thumbnail.
+export function thumbKey(bankId, n) {
+  return `${sceneKey(bankId, n)}-thumb`;
+}
+
 function readBanks() {
   try {
     const raw = localStorage.getItem(BANKS_KEY);
@@ -228,14 +236,20 @@ export function deleteBank(id) {
   if (idx === -1) return getActiveBankId();
   banks.splice(idx, 1);
   writeBanks(banks);
-  for (let i = 0; i < SCENES_PER_BANK; i++) localStorage.removeItem(sceneKey(id, i));
+  for (let i = 0; i < SCENES_PER_BANK; i++) {
+    localStorage.removeItem(sceneKey(id, i));
+    localStorage.removeItem(thumbKey(id, i));
+  }
   if (localStorage.getItem(ACTIVE_BANK_KEY) === id) setActiveBankId(banks[0].id);
   return getActiveBankId();
 }
 
 export function resetAllBanks() {
   listBanks().forEach(b => {
-    for (let i = 0; i < SCENES_PER_BANK; i++) localStorage.removeItem(sceneKey(b.id, i));
+    for (let i = 0; i < SCENES_PER_BANK; i++) {
+      localStorage.removeItem(sceneKey(b.id, i));
+      localStorage.removeItem(thumbKey(b.id, i));
+    }
   });
   localStorage.removeItem(BANKS_KEY);
   localStorage.removeItem(ACTIVE_BANK_KEY);

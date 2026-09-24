@@ -4,7 +4,7 @@ import { getLayers, addLayer, removeLayer, duplicateLayer, moveLayer, createMod,
 import { render } from './engine.js';
 import {
   saveToUrl, saveSceneToUrl, buildShareUrl, showWarning, showSuccess, encodeState, encodeStateForDirtyCheck, deserializeLayers,
-  getCompressedUrlLength, saveGlobalAudioState, sceneKey, listBanks, getActiveBankId, setActiveBankId,
+  getCompressedUrlLength, saveGlobalAudioState, sceneKey, thumbKey, listBanks, getActiveBankId, setActiveBankId,
   createBank, renameBank, duplicateBank, deleteBank, resetAllBanks, exportBank, importBankFile,
   decodeEncodedScene, SCENES_PER_BANK,
 } from './state.js';
@@ -127,6 +127,14 @@ let _urlGaugeLabel = null;
 let _urlGaugeTimer = null;
 const URL_GAUGE_MAX = 8000;
 
+// "Show scene thumbnails" toggle — a device-local display preference, stored
+// directly in localStorage like the scenes themselves (not routed through
+// uiState/the share URL, so it doesn't affect how a shared link looks for
+// someone else). Named to avoid clashing with isPreview()'s unrelated sense
+// of "viewing a read-only preset bank".
+const THUMB_PREVIEW_KEY = 'hydra-scene-thumb-preview';
+let thumbPreviewEnabled = localStorage.getItem(THUMB_PREVIEW_KEY) !== '0'; // default on
+
 function isPreview() {
   return previewBank !== null;
 }
@@ -142,14 +150,43 @@ function slotFilled(slot) {
   return slotRaw(slot) !== null;
 }
 
+function slotThumb(slot) {
+  if (isPreview()) return null; // not bundled in preset previews (yet)
+  return localStorage.getItem(thumbKey(activeBankId, slot));
+}
+
+const THUMB_W = 120, THUMB_H = 90;
+
+// Grabs a small preview off the live canvas for the scene grid. Deferred to
+// the next animation frame: this can run at an arbitrary point between
+// Hydra's own rAF-driven draws, and reading a WebGL canvas right then risks
+// catching it just after the browser's presented/cleared it. Scheduling our
+// read via rAF orders it after Hydra's next draw call within the same frame,
+// so it reliably sees fresh pixels.
+function writeSlotThumb(slot) {
+  const src = document.getElementById('hydraCanvas');
+  if (!src || !src.width || !src.height) return;
+  const bankId = activeBankId;
+  requestAnimationFrame(() => {
+    try {
+      const c = document.createElement('canvas');
+      c.width = THUMB_W; c.height = THUMB_H;
+      c.getContext('2d').drawImage(src, 0, 0, THUMB_W, THUMB_H);
+      localStorage.setItem(thumbKey(bankId, slot), c.toDataURL('image/webp', 0.6));
+    } catch {} // e.g. a cross-origin image source tainted the canvas — thumbnail is best-effort
+  });
+}
+
 function writeSlot(slot, encoded) {
   if (isPreview()) return; // UI disables writes while previewing
   localStorage.setItem(sceneKey(activeBankId, slot), encoded);
+  writeSlotThumb(slot);
 }
 
 function clearSlotStorage(slot) {
   if (isPreview()) return;
   localStorage.removeItem(sceneKey(activeBankId, slot));
+  localStorage.removeItem(thumbKey(activeBankId, slot));
 }
 
 function getContentEncoded() {
@@ -186,24 +223,38 @@ function injectBlinkStyle() {
   document.head.appendChild(style);
 }
 
-function applySlotStyle(btn, filled, active, blinking = false) {
-  const base = 'width:100%;border-radius:2px;cursor:pointer;font-size:9px;font-family:inherit;font-weight:bold;padding:5px 0;border:1px solid;transition:background 0.15s,border-color 0.15s,color 0.15s;';
+function applySlotStyle(btn, labelEl, filled, active, blinking = false, thumb = null) {
+  const preview = thumbPreviewEnabled;
+  const base = preview
+    ? 'width:100%;aspect-ratio:4/3;position:relative;overflow:hidden;border-radius:3px;cursor:pointer;font-size:9px;font-family:inherit;font-weight:bold;border:2px solid;transition:border-color 0.15s,color 0.15s;background-size:cover;background-position:center;'
+    : 'width:100%;position:relative;border-radius:2px;cursor:pointer;font-size:9px;font-family:inherit;font-weight:bold;padding:5px 0;border:1px solid;transition:background 0.15s,border-color 0.15s,color 0.15s;text-align:center;';
   let style;
   if (active) {
-    style = base + 'background:rgba(100,200,120,0.3);border-color:rgba(100,200,120,0.7);color:rgba(140,230,160,0.95)';
+    style = base + (preview ? 'border-color:rgba(100,200,120,0.9);color:rgba(140,230,160,0.95)'
+                             : 'background:rgba(100,200,120,0.3);border-color:rgba(100,200,120,0.7);color:rgba(140,230,160,0.95)');
   } else if (filled) {
-    style = base + 'background:rgba(100,160,255,0.15);border-color:rgba(100,160,255,0.4);color:rgba(140,190,255,0.9)';
+    style = base + (preview ? 'border-color:rgba(100,160,255,0.4);color:rgba(140,190,255,0.9)'
+                             : 'background:rgba(100,160,255,0.15);border-color:rgba(100,160,255,0.4);color:rgba(140,190,255,0.9)');
   } else {
-    style = base + 'background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.1);color:rgba(255,255,255,0.25)';
+    style = base + (preview ? 'border-color:rgba(255,255,255,0.15);color:rgba(255,255,255,0.25)'
+                             : 'background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.1);color:rgba(255,255,255,0.25)');
+  }
+  if (preview) {
+    style += thumb
+      ? `;background-image:url(${thumb});background-color:#101010`
+      : `;background-color:${active ? 'rgba(100,200,120,0.3)' : filled ? 'rgba(100,160,255,0.15)' : 'rgba(255,255,255,0.04)'}`;
   }
   if (blinking) style += ';animation:scene-slot-blink 0.9s ease-in-out infinite';
   btn.style.cssText = style;
+  labelEl.style.cssText = preview
+    ? 'position:absolute;left:3px;bottom:2px;padding:1px 3px;border-radius:2px;background:rgba(0,0,0,0.55);pointer-events:none;'
+    : 'pointer-events:none;';
 }
 
 function refreshSceneButtons() {
   _sceneButtons.forEach((btn, slot) => {
     const filled = slotFilled(slot);
-    applySlotStyle(btn, filled, activeSlot === slot, _saveAsArmed && !filled);
+    applySlotStyle(btn, btn._label, filled, activeSlot === slot, _saveAsArmed && !filled, slotThumb(slot));
   });
   const label = activeSlot !== null ? ` ${activeSlot + 1}` : '';
   if (_saveSceneBtn)  _saveSceneBtn.textContent  = `Save${label}`;
@@ -447,15 +498,41 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     });
   }
 
+  const previewToggleRow = document.createElement('label');
+  previewToggleRow.style.cssText = 'display:flex; align-items:center; gap:5px; margin:2px 4px 4px; cursor:pointer;';
+  const previewToggle = document.createElement('input');
+  previewToggle.type = 'checkbox';
+  previewToggle.checked = thumbPreviewEnabled;
+  previewToggle.style.cssText = 'cursor:pointer; margin:0; accent-color: rgb(84 84 88);';
+  const previewToggleLabel = document.createElement('span');
+  previewToggleLabel.textContent = 'Preview';
+  previewToggleLabel.style.cssText = 'font-size:9px; font-family:monospace; color:rgba(255,255,255,0.4);';
+  previewToggle.addEventListener('change', () => {
+    thumbPreviewEnabled = previewToggle.checked;
+    localStorage.setItem(THUMB_PREVIEW_KEY, thumbPreviewEnabled ? '1' : '0');
+    updateGridColumns();
+    refreshSceneButtons();
+  });
+  previewToggleRow.append(previewToggle, previewToggleLabel);
+  content.appendChild(previewToggleRow);
+
   const grid = document.createElement('div');
-  grid.style.cssText = 'display:grid;grid-template-columns:repeat(8,1fr);gap:3px;padding:6px 4px 4px';
+  function updateGridColumns() {
+    grid.style.cssText = thumbPreviewEnabled
+      ? 'display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:6px 4px 4px'
+      : 'display:grid;grid-template-columns:repeat(8,1fr);gap:3px;padding:6px 4px 4px';
+  }
+  updateGridColumns();
 
   _sceneButtons = [];
 
   for (let slot = 0; slot < SCENE_COUNT; slot++) {
     const btn    = document.createElement('button');
-    btn.textContent = String(slot + 1); // display 1-16, index 0-15
-    applySlotStyle(btn, slotFilled(slot), false);
+    const label  = document.createElement('span');
+    label.textContent = String(slot + 1); // display 1-16, index 0-15
+    btn._label = label;
+    btn.appendChild(label);
+    applySlotStyle(btn, label, slotFilled(slot), false, false, slotThumb(slot));
 
     btn.addEventListener('click', () => {
       if (_saveAsArmed) { handleSaveAsTarget(slot); return; }
