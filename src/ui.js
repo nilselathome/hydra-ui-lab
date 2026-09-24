@@ -93,9 +93,12 @@ function applyOrangeTint(btn, active) {
     btn.style.borderColor  = 'rgba(255,150,40,0.7)';
     btn.style.color        = 'rgba(255,190,80,0.95)';
   } else {
-    btn.style.background   = '';
-    btn.style.borderColor  = '';
-    btn.style.color        = '';
+    // Clearing to '' falls through to the browser's default button styling
+    // (white) instead of the app's dark buttons — restore btnBaseStyle's
+    // actual values instead (see btnBaseStyle in initScenesPane).
+    btn.style.background   = 'rgba(255,255,255,0.04)';
+    btn.style.borderColor  = 'rgba(255,255,255,0.1)';
+    btn.style.color        = 'rgba(255,255,255,0.3)';
   }
 }
 
