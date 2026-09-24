@@ -1,6 +1,6 @@
 import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
 import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
-import { getLayers, addLayer, removeLayer, duplicateLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, setTextBankIndex, isTextBankPlaying, startTextBankPlayer, stopTextBankPlayer, applyState, registerGlsl, reloadThree, THREE_PRESETS } from './layers.js';
+import { getLayers, addLayer, removeLayer, duplicateLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, setTextBankIndex, isTextBankPlaying, startTextBankPlayer, stopTextBankPlayer, snapshotTextEntry, applyState, registerGlsl, reloadThree, THREE_PRESETS } from './layers.js';
 import { render } from './engine.js';
 import {
   saveToUrl, saveSceneToUrl, buildShareUrl, showWarning, showSuccess, encodeState, encodeStateForDirtyCheck, deserializeLayers,
@@ -1558,6 +1558,38 @@ function addTextControls(folder, layer) {
     border-radius: 2px; color: #fff; font-size: 10px; font-family: inherit;
     padding: 4px 6px; outline: none;
   `;
+
+  // Paste multiline — splits clipboard text on line breaks into one text-bank
+  // entry per line, replacing whatever's currently in the bank.
+  const pasteBtn = document.createElement('button');
+  pasteBtn.textContent = 'Paste multiline';
+  pasteBtn.style.cssText = `
+    width: calc(100% - 8px); background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 2px; color: rgba(255,255,255,0.6); font-size: 10px;
+    font-family: inherit; font-weight: bold; padding: 5px; cursor: pointer;
+    margin: 2px 4px 4px; box-sizing: border-box;
+  `;
+  pasteBtn.addEventListener('click', async () => {
+    let text;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      alert('Could not read the clipboard.');
+      return;
+    }
+    const lines = text.split(/\r\n|\r|\n/).map(l => l.trim()).filter(l => l !== '');
+    if (lines.length < 2) {
+      alert('Clipboard does not contain multiline text.');
+      return;
+    }
+    const hasContent = layer.textBank.some(e => e.text?.trim());
+    if (hasContent && !confirm('Discard unsaved changes?')) return;
+
+    layer.textBank = lines.map(text => snapshotTextEntry(layer, text));
+    setTextBankIndex(layer, 0);
+    rebuild();
+  });
+  wrap.appendChild(pasteBtn);
 
   // Text bank — a poem/speech's worth of lines. The select switches which
   // entry is "live"; the input below edits whichever one is selected.
