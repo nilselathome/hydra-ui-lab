@@ -1,6 +1,6 @@
 import { Pane } from 'https://cdn.jsdelivr.net/npm/tweakpane@4.0.5/dist/tweakpane.min.js';
 import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from './layerDefs.js';
-import { getLayers, addLayer, removeLayer, duplicateLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, setTextBankIndex, isTextBankPlaying, startTextBankPlayer, stopTextBankPlayer, snapshotTextEntry, applyState, registerGlsl, reloadThree, THREE_PRESETS } from './layers.js';
+import { getLayers, addLayer, removeLayer, duplicateLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, setTextBankIndex, isTextBankPlaying, startTextBankPlayer, stopTextBankPlayer, snapshotTextEntry, parseTextBankTimings, applyState, registerGlsl, reloadThree, THREE_PRESETS } from './layers.js';
 import { render } from './engine.js';
 import {
   saveToUrl, saveSceneToUrl, buildShareUrl, showWarning, showSuccess, encodeState, encodeStateForDirtyCheck, deserializeLayers,
@@ -1781,14 +1781,36 @@ function addTextControls(folder, layer) {
   timingInput.type = 'text';
   timingInput.placeholder = 'custom timings (s), comma-separated — overrides interval';
   timingInput.value = layer.textBankTimings ?? '';
-  timingInput.style.cssText = `
-    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);
+  const timingBaseStyle = `
     border-radius: 2px; color: #fff; font-size: 9px; font-family: monospace;
-    padding: 4px 6px; outline: none;
+    padding: 4px 6px; outline: none; transition: background 0.12s, border-color 0.12s;
   `;
+  const timingNeutralColors = 'background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);';
+  // Custom timings wrap around (see textBankDurationForStep), so a step-count
+  // mismatch never breaks anything — this is just a quick visual nudge, shown
+  // only while actively editing, that the timings don't line up 1:1 with the
+  // bank's lines. Reverts to the neutral look on blur so it doesn't linger.
+  function updateTimingValidity() {
+    const raw = timingInput.value.trim();
+    let colors;
+    if (!raw) {
+      colors = timingNeutralColors; // falls back to interval
+    } else if (parseTextBankTimings(raw).length === layer.textBank.length) {
+      colors = 'background: rgba(100,200,120,0.1); border: 1px solid rgba(100,200,120,0.5);'; // OK — one timing per line
+    } else {
+      colors = 'background: rgba(220,60,60,0.1); border: 1px solid rgba(220,60,60,0.55);'; // too few/too many steps
+    }
+    timingInput.style.cssText = timingBaseStyle + colors;
+  }
+  timingInput.style.cssText = timingBaseStyle + timingNeutralColors;
+  timingInput.addEventListener('focus', updateTimingValidity);
   timingInput.addEventListener('input', () => {
     layer.textBankTimings = timingInput.value;
+    updateTimingValidity();
     save();
+  });
+  timingInput.addEventListener('blur', () => {
+    timingInput.style.cssText = timingBaseStyle + timingNeutralColors;
   });
 
   playerWrap.append(playBtn, intervalRow, timingInput);

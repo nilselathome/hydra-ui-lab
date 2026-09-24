@@ -432,11 +432,17 @@ export async function drawTextCanvas(layer) {
 // — switching entries applies that style onto the layer, not just the text.
 const _textBankTimers = new Map(); // layerId → timeout handle
 
-function textBankDurationForStep(layer, step) {
-  const list = (layer.textBankTimings ?? '')
+// Also used by the UI (src/ui.js) to validate the custom-timings input
+// against the bank's step count.
+export function parseTextBankTimings(timingsStr) {
+  return (timingsStr ?? '')
     .split(',')
     .map(s => parseFloat(s.trim()))
     .filter(n => isFinite(n) && n > 0);
+}
+
+function textBankDurationForStep(layer, step) {
+  const list = parseTextBankTimings(layer.textBankTimings);
   return list.length ? list[step % list.length] : (layer.textBankInterval ?? 5);
 }
 
