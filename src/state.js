@@ -294,6 +294,25 @@ export function encodeState(layers, uiState = {}) {
   return btoa(encodeURIComponent(JSON.stringify(payload)));
 }
 
+// Same as encodeState, but for a playing text bank it ignores the fields
+// setTextBankIndex() drifts on its own timer (current entry, text, mirrored
+// style) — otherwise a scene with autoplay running looks "unsaved" every
+// time its interval ticks, even with no actual edits. Only for the
+// unsaved-changes check — never for what actually gets persisted.
+export function encodeStateForDirtyCheck(layers) {
+  const masked = layers.map(layer => {
+    if (layer.type !== 'text' || !layer.textBankPlaying) return layer;
+    return {
+      ...layer,
+      textContent: '',
+      fontFamily: '',
+      textBankIndex: 0,
+      params: { ...layer.params, size: 0, x: 0, y: 0, r: 0, g: 0, b: 0 },
+    };
+  });
+  return encodeState(masked);
+}
+
 // Async gzip + URL-safe base64 (no percent-encoding overhead)
 async function compressPayload(payload) {
   const bytes = new TextEncoder().encode(JSON.stringify(payload));

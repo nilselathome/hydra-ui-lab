@@ -3,7 +3,7 @@ import { LAYER_TYPES, BLEND_MODES, MOD_SOURCES, MOD_FNS, TRANSFORM_TYPES } from 
 import { getLayers, addLayer, removeLayer, duplicateLayer, moveLayer, createMod, resetModSrcParams, createTransform, createTransformAnimate, drawTextCanvas, setTextBankIndex, isTextBankPlaying, startTextBankPlayer, stopTextBankPlayer, applyState, registerGlsl, reloadThree, THREE_PRESETS } from './layers.js';
 import { render } from './engine.js';
 import {
-  saveToUrl, saveSceneToUrl, buildShareUrl, showWarning, showSuccess, encodeState, deserializeLayers,
+  saveToUrl, saveSceneToUrl, buildShareUrl, showWarning, showSuccess, encodeState, encodeStateForDirtyCheck, deserializeLayers,
   getCompressedUrlLength, saveGlobalAudioState, sceneKey, listBanks, getActiveBankId, setActiveBankId,
   createBank, renameBank, duplicateBank, deleteBank, resetAllBanks, exportBank, importBankFile,
   decodeEncodedScene, SCENES_PER_BANK,
@@ -69,8 +69,7 @@ function save() {
     refreshUrlGauge();
     return;
   }
-  const encoded = getContentEncoded();
-  const isSaved = activeSlot !== null && _cleanEncoded !== null && encoded === _cleanEncoded;
+  const isSaved = activeSlot !== null && _cleanEncoded !== null && getDirtyCheckEncoded() === _cleanEncoded;
   if (isSaved) {
     saveSceneToUrl(activeSlot);
   } else {
@@ -104,7 +103,7 @@ function applyOrangeTint(btn, active) {
 
 function refreshSaveBtn() {
   if (!_saveSceneBtn) return;
-  const dirty = _cleanEncoded !== null && getContentEncoded() !== _cleanEncoded;
+  const dirty = _cleanEncoded !== null && getDirtyCheckEncoded() !== _cleanEncoded;
   applyOrangeTint(_saveSceneBtn, dirty);
   applyOrangeTint(_saveAsBtn, dirty || _saveAsArmed);
 }
@@ -157,6 +156,13 @@ function getContentEncoded() {
   // Scenes are layers only — audio is global (see getGlobalAudioState) and
   // deliberately excluded so switching/saving/copying a scene never touches playback.
   return encodeState(getLayers());
+}
+
+// Same as getContentEncoded, but ignores a playing text bank's own
+// autoplay drift (see encodeStateForDirtyCheck). Only for detecting
+// unsaved changes — actual saves always use getContentEncoded().
+function getDirtyCheckEncoded() {
+  return encodeStateForDirtyCheck(getLayers());
 }
 
 const decodeStoredScene = decodeEncodedScene;
@@ -285,11 +291,11 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     let slot = initialSceneSlot;
     if (slot == null) slot = previewBank.scenes.findIndex(s => s != null);
     activeSlot = slot !== -1 ? slot : null;
-    _cleanEncoded = getContentEncoded(); // layers already applied during boot
+    _cleanEncoded = getDirtyCheckEncoded(); // layers already applied during boot
   } else {
     activeBankId = getActiveBankId();
     activeSlot = initialSceneSlot ?? 0;
-    if (initialSceneSlot !== null) _cleanEncoded = getContentEncoded();
+    if (initialSceneSlot !== null) _cleanEncoded = getDirtyCheckEncoded();
   }
 
   const contextMenu = createSceneContextMenu();
@@ -373,7 +379,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     activeBankId = id;
     setActiveBankId(id);
     activeSlot = keepSlot;
-    _cleanEncoded = getContentEncoded(); // canvas already shows this slot's content
+    _cleanEncoded = getDirtyCheckEncoded(); // canvas already shows this slot's content
     refreshBankSelect();
     refreshSceneButtons();
     refreshSaveBtn();
@@ -395,6 +401,8 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
       btn.textContent = name;
       btn.style.cssText = bankBtnStyle;
       btn.addEventListener('click', () => {
+        const dirty = _cleanEncoded !== null && getDirtyCheckEncoded() !== _cleanEncoded;
+        if (dirty && !confirm('Discard unsaved changes?')) return;
         location.href = `${location.pathname}?preset=${encodeURIComponent(name)}`;
       });
       presetsRow.appendChild(btn);
@@ -484,9 +492,8 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     if (isPreview()) return;
     const existing = slotFilled(slot);
     if (existing && !confirm(`Overwrite existing scene ${slot + 1}?`)) return; // stay armed, pick again
-    const encoded = getContentEncoded();
-    writeSlot(slot, encoded);
-    _cleanEncoded = encoded;
+    writeSlot(slot, getContentEncoded());
+    _cleanEncoded = getDirtyCheckEncoded();
     activeSlot = slot;
     disarmSaveAs();
     rebuild();
@@ -508,7 +515,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
 
   function goToScene(slot, { silent = false } = {}) {
     if (activeSlot === slot) return;
-    const dirty = _cleanEncoded !== null && getContentEncoded() !== _cleanEncoded;
+    const dirty = _cleanEncoded !== null && getDirtyCheckEncoded() !== _cleanEncoded;
     const raw = slotRaw(slot);
     if (raw) {
       if (dirty && !silent && !confirm('Discard unsaved changes?')) return;
@@ -522,7 +529,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
       applyState([]); // empty slot, nothing dirty (or read-only preview) → blank canvas
     }
     activeSlot = slot;
-    _cleanEncoded = getContentEncoded();
+    _cleanEncoded = getDirtyCheckEncoded();
     rebuild();
     refreshSceneButtons();
     refreshSaveBtn();
@@ -531,7 +538,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
   function switchBank(id, { force = false } = {}) {
     if (isPreview() || id === null || id === activeBankId) { refreshBankSelect(); return; }
     if (!force) {
-      const dirty = _cleanEncoded !== null && getContentEncoded() !== _cleanEncoded;
+      const dirty = _cleanEncoded !== null && getDirtyCheckEncoded() !== _cleanEncoded;
       if (dirty && !confirm('Discard unsaved changes?')) { refreshBankSelect(); return; }
     }
     stopScenePlayer();
@@ -545,7 +552,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
       applyState([]);
     }
     activeSlot = 0;
-    _cleanEncoded = getContentEncoded();
+    _cleanEncoded = getDirtyCheckEncoded();
     rebuild();
     refreshBankSelect();
     refreshSceneButtons();
@@ -781,9 +788,8 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
   _saveSceneBtn.style.cssText = btnBaseStyle;
   _saveSceneBtn.addEventListener('click', () => {
     if (isPreview() || activeSlot === null) return;
-    const encoded = getContentEncoded();
-    writeSlot(activeSlot, encoded);
-    _cleanEncoded = encoded;
+    writeSlot(activeSlot, getContentEncoded());
+    _cleanEncoded = getDirtyCheckEncoded();
     refreshSceneButtons();
     refreshSaveBtn();
     saveSceneToUrl(activeSlot);
@@ -799,7 +805,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     clearSlotStorage(activeSlot);
     applyState([]);
     rebuild();
-    _cleanEncoded = getContentEncoded();
+    _cleanEncoded = getDirtyCheckEncoded();
     refreshSceneButtons();
     refreshSaveBtn();
   });
@@ -1172,7 +1178,7 @@ function initAudioPane(container, uiState = {}) {
       try {
         const ok = await Audio.connectUrl(url);
         if (uiState.loopA != null && uiState.loopB != null) Audio.restoreLoop(uiState.loopA, uiState.loopB);
-        _cleanEncoded = getContentEncoded();
+        _cleanEncoded = getDirtyCheckEncoded();
         if (!ok) showAutoplayOverlay();
       } catch (e) {
         showWarning(e.message ?? 'Audio error');
