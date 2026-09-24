@@ -30,6 +30,11 @@ let layersPaneExpanded = true;
 let scenesPaneExpanded = true;
 let audioLibraryTrack  = null; // filename of active library track, or null
 
+// Set by initScenesPane once the scene player closure exists — lets
+// restartEverything() below reach into it without hoisting all that state
+// to module scope.
+let restartScenePlayer = () => {};
+
 function refreshUrlGauge() {
   if (!_urlGaugeFill) return;
   clearTimeout(_urlGaugeTimer);
@@ -77,6 +82,27 @@ function save() {
   }
   refreshSaveBtn();
   refreshUrlGauge();
+}
+
+// Snaps every running timing system back to a shared t=0 — Hydra's own
+// animation clock (drives every transform/mod Animate function), any
+// currently-playing text banks, the scene player, and the loaded audio
+// track's playhead (to the A-B loop's start if one's set, otherwise 0) — so
+// a performer can hit this and have everything, including custom timings,
+// actually line back up instead of drifting apart on separate schedules.
+function restartEverything() {
+  if (typeof window.time === 'number') window.time = 0;
+  const { loopA, loopB } = Audio.getLoop();
+  Audio.seekFile(loopA !== null && loopB !== null ? Math.min(loopA, loopB) : 0);
+  getLayers().forEach(layer => {
+    if (layer.type === 'text' && isTextBankPlaying(layer)) {
+      setTextBankIndex(layer, 0);
+      startTextBankPlayer(layer);
+    }
+  });
+  restartScenePlayer();
+  save();
+  showSuccess('Restarted');
 }
 
 function savePreviewSceneToUrl(slot) {
@@ -701,6 +727,21 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     scenePlayerTimer = setTimeout(tick, Math.max(0.1, dur) * 1000);
   }
 
+  // Hooked up to the global "Restart everything" action (see restartEverything)
+  // — jumps back to the first filled scene and restarts the interval/custom
+  // timings schedule from step 0, same idea as the text-bank restart.
+  restartScenePlayer = () => {
+    if (!scenePlayerRunning) return;
+    const filled = getFilledSlots();
+    if (filled.length < 2) { stopScenePlayer(); return; }
+    clearTimeout(scenePlayerTimer);
+    scenePlayerStep = 0;
+    goToScene(filled[0], { silent: true });
+    const dur = durationForStep(scenePlayerStep);
+    scenePlayerStep++;
+    scenePlayerTimer = setTimeout(tick, Math.max(0.1, dur) * 1000);
+  };
+
   const playerWrap = document.createElement('div');
   playerWrap.style.cssText = 'margin: 2px 4px 8px; display:flex; flex-direction:column; gap:5px;';
 
@@ -973,6 +1014,18 @@ export function initUI(container, uiState = {}, initialSceneSlot = null, preview
   addPaneExpanded    = uiState.addPane    ?? true;
   layersPaneExpanded = uiState.layersPane ?? true;
 
+  // Ctrl+R — "restart everything" (see restartEverything), not a page
+  // reload. Deliberately Ctrl only, not Cmd — Cmd+R is too close to muscle
+  // memory for an actual browser reload on macOS. This is meant to be
+  // pressed in the same instant as restarting an external audio track, so it
+  // needs to work no matter what's focused.
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key.toLowerCase() === 'r') {
+      e.preventDefault();
+      restartEverything();
+    }
+  });
+
   initAudioPane(container, uiState);
 
   initScenesPane(container, uiState, initialSceneSlot, previewData);
@@ -1019,6 +1072,8 @@ function initAudioPane(container, uiState = {}) {
   };
 
   const clearLibraryTrack = () => { audioLibraryTrack = null; save(); };
+
+  pane.addButton({ title: '⟲ Restart Everything (Ctrl+R)' }).on('click', restartEverything);
 
   pane.addButton({ title: 'Mic' }).on('click', () => { clearLibraryTrack(); runAsync(Audio.connectMic); });
   pane.addButton({ title: 'Tab / Screen audio' }).on('click', () => { clearLibraryTrack(); runAsync(Audio.connectTab); });
@@ -1577,7 +1632,13 @@ function addTextControls(folder, layer) {
       alert('Could not read the clipboard.');
       return;
     }
-    const lines = text.split(/\r\n|\r|\n/).map(l => l.trim()).filter(l => l !== '');
+    // Blank lines between two text lines are kept as their own (empty-text)
+    // bank entry — lyrics/poems often use them to mark a pause, and having a
+    // dedicated step there makes that pause easy to time via custom timings.
+    // Leading/trailing blank lines are just clipboard noise, so those are dropped.
+    const lines = text.split(/\r\n|\r|\n/).map(l => l.trim());
+    while (lines.length && lines[0] === '') lines.shift();
+    while (lines.length && lines[lines.length - 1] === '') lines.pop();
     if (lines.length < 2) {
       alert('Clipboard does not contain multiline text.');
       return;
