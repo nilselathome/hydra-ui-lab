@@ -1795,6 +1795,25 @@ function addTextControls(folder, layer) {
   wrap.appendChild(playerWrap);
   updatePlayBtn();
 
+  // While the bank auto-advances (startTextBankPlayer, in layers.js), the
+  // active index/text/font/color change on their own timer — poll for that
+  // and mirror it here instead of leaving the panel showing a stale entry.
+  // Self-terminating: once this panel is rebuilt away, `wrap` is no longer
+  // attached and the loop stops rescheduling itself.
+  let lastLiveIndex = layer.textBankIndex;
+  function pollLiveBank() {
+    if (!document.body.contains(wrap)) return; // panel rebuilt away — stop polling
+    if (isTextBankPlaying(layer) && layer.textBankIndex !== lastLiveIndex) {
+      lastLiveIndex = layer.textBankIndex;
+      refreshBankSelect();
+      textInput.value = layer.textContent ?? '';
+      fontSelect.value = layer.fontFamily;
+      colorInput.value = rgbToHex(layer.params.r, layer.params.g, layer.params.b);
+    }
+    setTimeout(pollLiveBank, 200);
+  }
+  setTimeout(pollLiveBank, 200); // first check runs after `wrap` is attached below
+
   content.appendChild(wrap);
   return wrap;
 }
