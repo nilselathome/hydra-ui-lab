@@ -214,7 +214,7 @@ function slotFilled(slot) {
 }
 
 function slotThumb(slot) {
-  if (isPreview()) return null; // not bundled in preset previews (yet)
+  if (isPreview()) return previewBank.thumbs?.[slot] ?? null;
   return localStorage.getItem(thumbKey(activeBankId, slot));
 }
 
@@ -237,6 +237,10 @@ function writeSlotThumb(slot) {
       c.getContext('2d').drawImage(src, 0, 0, THUMB_W, THUMB_H);
       localStorage.setItem(thumbKey(bankId, slot), c.toDataURL('image/webp', 0.6));
     } catch {} // e.g. a cross-origin image source tainted the canvas — thumbnail is best-effort
+    // The capture above lands a frame after writeSlot()'s own refreshSceneButtons()
+    // call already ran, so the button would otherwise keep showing its old/no
+    // thumbnail until some later, unrelated refresh (e.g. switching scenes).
+    refreshSceneButtons();
   });
 }
 
@@ -398,7 +402,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
 
   const content = pane.element.querySelector('.tp-rotv_c') ?? pane.element;
 
-  previewBank = previewData ? { name: previewData.name, scenes: previewData.scenes, audio: previewData.audio ?? null } : null;
+  previewBank = previewData ? { name: previewData.name, scenes: previewData.scenes, thumbs: previewData.thumbs ?? null, audio: previewData.audio ?? null } : null;
   if (previewBank) {
     activeBankId = null;
     // app.js already resolved which scene to open (?scene=N, or the first non-empty one)
@@ -502,7 +506,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     if (!isPreview()) return;
     const keepSlot = activeSlot;
     const bundledAudio = previewBank.audio;
-    const id = importBankFile({ type: 'hydra-bank', version: 2, name: previewBank.name, scenes: previewBank.scenes });
+    const id = importBankFile({ type: 'hydra-bank', version: 2, name: previewBank.name, scenes: previewBank.scenes, thumbs: previewBank.thumbs });
     // Carry over the preset's soundtrack so it doesn't cut out on exiting preview.
     if (bundledAudio) saveGlobalAudioState(bundledAudio);
     previewBank = null;

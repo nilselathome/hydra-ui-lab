@@ -262,8 +262,12 @@ export function resetAllBanks() {
 export function exportBank(id) {
   const bank = listBanks().find(b => b.id === id);
   const scenes = [];
-  for (let i = 0; i < SCENES_PER_BANK; i++) scenes.push(localStorage.getItem(sceneKey(id, i)));
-  return { type: 'hydra-bank', version: 2, name: bank?.name ?? 'Bank', scenes, audio: loadGlobalAudioState() };
+  const thumbs = [];
+  for (let i = 0; i < SCENES_PER_BANK; i++) {
+    scenes.push(localStorage.getItem(sceneKey(id, i)));
+    thumbs.push(localStorage.getItem(thumbKey(id, i)));
+  }
+  return { type: 'hydra-bank', version: 2, name: bank?.name ?? 'Bank', scenes, thumbs, audio: loadGlobalAudioState() };
 }
 
 // Creates a new bank from an exported/preset bank object and writes its scenes.
@@ -275,6 +279,9 @@ export function importBankFile(data) {
   const id = createBank(data.name || 'Imported bank');
   data.scenes.slice(0, SCENES_PER_BANK).forEach((raw, i) => {
     if (raw !== null && raw !== undefined) localStorage.setItem(sceneKey(id, i), raw);
+  });
+  data.thumbs?.slice(0, SCENES_PER_BANK).forEach((thumb, i) => {
+    if (thumb !== null && thumb !== undefined) localStorage.setItem(thumbKey(id, i), thumb);
   });
   return id;
 }
