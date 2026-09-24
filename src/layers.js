@@ -427,6 +427,9 @@ export async function drawTextCanvas(layer) {
 // player: a uniform interval, or comma-separated per-step custom durations
 // that override it. layer.textBankPlaying is persisted (see state.js) so a
 // reload/share-link resumes playback rather than requiring Play again.
+//
+// Each bank entry carries its own text *and* style (font/size/position/color)
+// — switching entries applies that style onto the layer, not just the text.
 const _textBankTimers = new Map(); // layerId → timeout handle
 
 function textBankDurationForStep(layer, step) {
@@ -437,11 +440,34 @@ function textBankDurationForStep(layer, step) {
   return list.length ? list[step % list.length] : (layer.textBankInterval ?? 5);
 }
 
+// Captures the layer's current style into a fresh bank entry (used for the
+// layer's first entry, and as a starting point when adding a new one).
+export function snapshotTextEntry(layer, text = '') {
+  return {
+    text,
+    fontFamily: layer.fontFamily,
+    size: layer.params.size,
+    x:    layer.params.x,
+    y:    layer.params.y,
+    r:    layer.params.r,
+    g:    layer.params.g,
+    b:    layer.params.b,
+  };
+}
+
 export function setTextBankIndex(layer, index) {
   const bank = layer.textBank ?? [];
   if (bank.length === 0) return;
   layer.textBankIndex = ((index % bank.length) + bank.length) % bank.length;
-  layer.textContent = bank[layer.textBankIndex] ?? '';
+  const entry = bank[layer.textBankIndex];
+  layer.textContent = entry.text ?? '';
+  layer.fontFamily   = entry.fontFamily ?? layer.fontFamily;
+  layer.params.size  = entry.size ?? layer.params.size;
+  layer.params.x     = entry.x    ?? layer.params.x;
+  layer.params.y     = entry.y    ?? layer.params.y;
+  layer.params.r     = entry.r    ?? layer.params.r;
+  layer.params.g     = entry.g    ?? layer.params.g;
+  layer.params.b     = entry.b    ?? layer.params.b;
   drawTextCanvas(layer);
 }
 
@@ -560,9 +586,10 @@ export function addLayer(type, overrides = {}) {
     layer._hydraSource = slot !== null ? window[`s${slot}`] : null;
     layer.textContent = 'Text';
     layer.fontFamily = 'Bebas Neue';
-    // "Text bank" — a poem/speech's worth of lines, switchable by hand or on
-    // an auto-advance timer. textContent above always mirrors the active entry.
-    layer.textBank         = ['Text'];
+    // "Text bank" — a poem/speech's worth of lines (each with its own style),
+    // switchable by hand or on an auto-advance timer. textContent/fontFamily/
+    // params.size,x,y,r,g,b above always mirror the active entry.
+    layer.textBank         = [snapshotTextEntry(layer, 'Text')];
     layer.textBankIndex    = 0;
     layer.textBankInterval = 5;
     layer.textBankTimings  = '';
@@ -613,16 +640,27 @@ function restoreLayerData(layer, data) {
     }
   }
   if (data.type === 'text') {
-    layer.fontFamily = data.fontFamily ?? 'Bebas Neue';
-    // Older saves have no textBank — synthesize a single-entry one from
-    // textContent so they still load correctly.
-    layer.textBank         = data.textBank?.length ? [...data.textBank] : [data.textContent ?? 'Text'];
+    // Style to fall back on for older saves whose bank entries are plain
+    // strings (pre-per-entry-style) or missing a field — the layer's own
+    // saved fontFamily/params at the time, or today's defaults.
+    const legacyStyle = {
+      fontFamily: data.fontFamily ?? 'Bebas Neue',
+      size: data.params?.size ?? layer.params.size,
+      x:    data.params?.x    ?? layer.params.x,
+      y:    data.params?.y    ?? layer.params.y,
+      r:    data.params?.r    ?? layer.params.r,
+      g:    data.params?.g    ?? layer.params.g,
+      b:    data.params?.b    ?? layer.params.b,
+    };
+    const rawBank = data.textBank?.length ? data.textBank : [data.textContent ?? 'Text'];
+    layer.textBank = rawBank.map(entry =>
+      typeof entry === 'string' ? { text: entry, ...legacyStyle } : { ...legacyStyle, ...entry }
+    );
     layer.textBankIndex    = Math.min(Math.max(data.textBankIndex ?? 0, 0), layer.textBank.length - 1);
     layer.textBankInterval = data.textBankInterval ?? 5;
     layer.textBankTimings  = data.textBankTimings  ?? '';
-    layer.textContent      = layer.textBank[layer.textBankIndex];
     layer.textBankPlaying  = false; // set true below if resumed
-    drawTextCanvas(layer);
+    setTextBankIndex(layer, layer.textBankIndex); // applies the active entry's style + redraws
     if (data.textBankPlaying) startTextBankPlayer(layer);
   }
   if (data.type === 'glsl') {

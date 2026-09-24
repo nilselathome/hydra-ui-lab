@@ -1443,6 +1443,12 @@ const TEXT_FONTS = [
   'PT Sans', 'Press Start 2P', 'Roboto Mono', 'Source Code Pro', 'Inconsolata',
 ];
 
+// Text-bank entries carry their own font/size/position/color (see
+// snapshotTextEntry/setTextBankIndex in layers.js) — these are the
+// LAYER_TYPES.text.params keys among those, used to keep the active entry in
+// sync when their generic sliders change.
+const TEXT_BANK_STYLE_KEYS = ['size', 'x', 'y'];
+
 function rgbToHex(r, g, b) {
   const toHex = (v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0');
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
@@ -1512,7 +1518,7 @@ function addTextControls(folder, layer) {
     layer.textBank.forEach((entry, i) => {
       const opt = document.createElement('option');
       opt.value = String(i);
-      const preview = entry.trim() ? entry.trim().slice(0, 28) : '(empty)';
+      const preview = entry.text.trim() ? entry.text.trim().slice(0, 28) : '(empty)';
       opt.textContent = `${i + 1}: ${preview}`;
       if (i === layer.textBankIndex) opt.selected = true;
       bankSelect.appendChild(opt);
@@ -1522,38 +1528,34 @@ function addTextControls(folder, layer) {
 
   textInput.addEventListener('input', async () => {
     layer.textContent = textInput.value;
-    layer.textBank[layer.textBankIndex] = textInput.value;
+    layer.textBank[layer.textBankIndex].text = textInput.value;
     refreshBankSelect();
     await drawTextCanvas(layer);
     render(getLayers());
     save();
   });
 
-  bankSelect.addEventListener('change', async () => {
+  // Switching entries changes font/size/position/color too (see
+  // setTextBankIndex) — rebuild so every control (Font, Color, and the
+  // generic Size/X/Y sliders built elsewhere in this panel) picks up the
+  // newly active entry's values, not just the canvas.
+  bankSelect.addEventListener('change', () => {
     setTextBankIndex(layer, parseInt(bankSelect.value, 10));
-    textInput.value = layer.textContent;
-    render(getLayers());
-    save();
+    rebuild();
   });
 
-  addEntryBtn.addEventListener('click', async () => {
-    layer.textBank.splice(layer.textBankIndex + 1, 0, '');
+  addEntryBtn.addEventListener('click', () => {
+    // New line starts as a copy of the current entry's style — just clear the text.
+    layer.textBank.splice(layer.textBankIndex + 1, 0, { ...layer.textBank[layer.textBankIndex], text: '' });
     setTextBankIndex(layer, layer.textBankIndex + 1);
-    refreshBankSelect();
-    textInput.value = layer.textContent;
-    textInput.focus();
-    render(getLayers());
-    save();
+    rebuild();
   });
 
-  removeEntryBtn.addEventListener('click', async () => {
+  removeEntryBtn.addEventListener('click', () => {
     if (layer.textBank.length <= 1) return;
     layer.textBank.splice(layer.textBankIndex, 1);
     setTextBankIndex(layer, layer.textBankIndex);
-    refreshBankSelect();
-    textInput.value = layer.textContent;
-    render(getLayers());
-    save();
+    rebuild();
   });
 
   // Font family selector
@@ -1573,6 +1575,7 @@ function addTextControls(folder, layer) {
   });
   fontSelect.addEventListener('change', async () => {
     layer.fontFamily = fontSelect.value;
+    layer.textBank[layer.textBankIndex].fontFamily = fontSelect.value;
     await drawTextCanvas(layer);
     render(getLayers());
     save();
@@ -1595,6 +1598,8 @@ function addTextControls(folder, layer) {
     layer.params.r = r;
     layer.params.g = g;
     layer.params.b = b;
+    const entry = layer.textBank[layer.textBankIndex];
+    entry.r = r; entry.g = g; entry.b = b;
     await drawTextCanvas(layer);
     render(getLayers());
     save();
@@ -2075,7 +2080,13 @@ function buildLayersUI() {
       if (p.hidden) return;
       const opts = { label: p.label, min: p.min, max: p.max };
       if (p.step) opts.step = p.step;
-      f.addBinding(layer.params, p.key, opts).on('change', onChange);
+      // Size/X/Y are part of each text-bank entry's style — keep the active
+      // entry in sync so switching entries brings them back correctly.
+      const isTextBankStyleParam = layer.type === 'text' && TEXT_BANK_STYLE_KEYS.includes(p.key);
+      f.addBinding(layer.params, p.key, opts).on('change', () => {
+        if (isTextBankStyleParam) layer.textBank[layer.textBankIndex][p.key] = layer.params[p.key];
+        onChange();
+      });
     });
 
     // ── Transforms ────────────────────────────────────────────
