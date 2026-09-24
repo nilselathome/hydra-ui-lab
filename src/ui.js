@@ -1583,7 +1583,7 @@ function addTextControls(folder, layer) {
       return;
     }
     const hasContent = layer.textBank.some(e => e.text?.trim());
-    if (hasContent && !confirm('Discard unsaved changes?')) return;
+    if (hasContent && !confirm('Overwrite existing text bank?')) return;
 
     layer.textBank = lines.map(text => snapshotTextEntry(layer, text));
     setTextBankIndex(layer, 0);
