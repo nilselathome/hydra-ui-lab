@@ -35,6 +35,38 @@ let audioLibraryTrack  = null; // filename of active library track, or null
 // to module scope.
 let restartScenePlayer = () => {};
 
+// ── UI show/hide (Tab) ──────────────────────────────────────────────────────
+// Lets a performer tuck the whole Tweakpane stack out of the way for a clean
+// screen capture. A floating indicator survives the hide so an accidental Tab
+// press (easy to fat-finger) never strands the panel with no way back.
+let uiVisible = true;
+let uiHiddenIndicator = null;
+
+function setUiVisible(visible) {
+  uiVisible = visible;
+  // visibility, not display: none — keeps the panel's scroll position (and
+  // Tweakpane's own internal layout) intact across a hide/show round-trip.
+  if (uiContainer) uiContainer.style.visibility = visible ? '' : 'hidden';
+  if (uiHiddenIndicator) uiHiddenIndicator.style.display = visible ? 'none' : 'flex';
+}
+
+function ensureUiHiddenIndicator() {
+  if (uiHiddenIndicator) return;
+  const el = document.createElement('button');
+  el.textContent = '☰ Show UI (Tab)';
+  el.title = 'Show UI (Tab)';
+  el.style.cssText = `
+    position: fixed; top: 12px; right: 12px; z-index: 9999; display: none;
+    align-items: center; background: rgba(20,20,20,0.75);
+    border: 1px solid rgba(255,255,255,0.25); border-radius: 4px;
+    color: rgba(255,255,255,0.8); font-size: 11px; font-family: monospace;
+    padding: 6px 10px; cursor: pointer;
+  `;
+  el.addEventListener('click', () => setUiVisible(true));
+  document.body.appendChild(el);
+  uiHiddenIndicator = el;
+}
+
 function refreshUrlGauge() {
   if (!_urlGaugeFill) return;
   clearTimeout(_urlGaugeTimer);
@@ -78,7 +110,7 @@ function save() {
   if (isSaved) {
     saveSceneToUrl(activeSlot);
   } else {
-    saveToUrl(getLayers(), getUiState());
+    saveToUrl(getLayers(), getUiState(), activeSlot);
   }
   refreshSaveBtn();
   refreshUrlGauge();
@@ -353,7 +385,7 @@ function createSceneContextMenu() {
   return { show, hide };
 }
 
-function initScenesPane(container, uiState = {}, initialSceneSlot = null, previewData = null) {
+function initScenesPane(container, uiState = {}, initialSceneSlot = null, previewData = null, initialEditingSlot = null) {
   scenesPaneExpanded = uiState.scenesPane ?? true;
   const pane = new Pane({ container, title: 'Scenes', expanded: scenesPaneExpanded });
   pane.element.style.marginBottom = '1rem';
@@ -371,8 +403,24 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     _cleanEncoded = getDirtyCheckEncoded(); // layers already applied during boot
   } else {
     activeBankId = getActiveBankId();
-    activeSlot = initialSceneSlot ?? 0;
-    if (initialSceneSlot !== null) _cleanEncoded = getDirtyCheckEncoded();
+    if (initialSceneSlot !== null) {
+      // #scene=N — the canvas already shows exactly this slot's saved content.
+      activeSlot = initialSceneSlot;
+      _cleanEncoded = getDirtyCheckEncoded();
+    } else if (initialEditingSlot !== null) {
+      // Reloaded on a dirty #z= URL that remembers which scene these edits
+      // started from (see save()). The canvas shows the unsaved edits, not
+      // this slot's stored content — restore the highlight/Save target
+      // without touching them, and diff against what's actually stored so
+      // the unsaved-changes indicator is correct right away.
+      activeSlot = initialEditingSlot;
+      const raw = slotRaw(initialEditingSlot);
+      const stored = raw ? decodeStoredScene(raw) : null;
+      if (stored) _cleanEncoded = encodeStateForDirtyCheck(deserializeLayers(stored.layers ?? stored));
+      showWarning(`Restored unsaved edits for Scene ${initialEditingSlot + 1} — remember to Save.`);
+    } else {
+      activeSlot = 0;
+    }
   }
 
   const contextMenu = createSceneContextMenu();
@@ -1009,26 +1057,39 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
   addCollapseAllCtrl(pane);
 }
 
-export function initUI(container, uiState = {}, initialSceneSlot = null, previewData = null) {
+export function initUI(container, uiState = {}, initialSceneSlot = null, previewData = null, initialEditingSlot = null) {
   uiContainer = container;
   addPaneExpanded    = uiState.addPane    ?? true;
   layersPaneExpanded = uiState.layersPane ?? true;
 
-  // Ctrl+R — "restart everything" (see restartEverything), not a page
-  // reload. Deliberately Ctrl only, not Cmd — Cmd+R is too close to muscle
-  // memory for an actual browser reload on macOS. This is meant to be
-  // pressed in the same instant as restarting an external audio track, so it
-  // needs to work no matter what's focused.
+  ensureUiHiddenIndicator();
+
   document.addEventListener('keydown', (e) => {
+    // Ctrl+R — "restart everything" (see restartEverything), not a page
+    // reload. Deliberately Ctrl only, not Cmd — Cmd+R is too close to muscle
+    // memory for an actual browser reload on macOS. This is meant to be
+    // pressed in the same instant as restarting an external audio track, so
+    // it needs to work no matter what's focused.
     if (e.ctrlKey && e.key.toLowerCase() === 'r') {
       e.preventDefault();
       restartEverything();
+      return;
+    }
+    // Tab — toggle the whole panel out of the way (e.g. for a clean screen
+    // capture). Skipped while focus is in a text field/select, where Tab is
+    // still needed for its usual job (moving focus, or inserting an actual
+    // tab in the code editors).
+    if (e.key === 'Tab') {
+      const tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
+      e.preventDefault();
+      setUiVisible(!uiVisible);
     }
   });
 
   initAudioPane(container, uiState);
 
-  initScenesPane(container, uiState, initialSceneSlot, previewData);
+  initScenesPane(container, uiState, initialSceneSlot, previewData, initialEditingSlot);
 
   addPane = new Pane({ container, title: 'Add Layer', expanded: addPaneExpanded });
   addPane.element.style.marginBottom = '1rem';

@@ -77,7 +77,7 @@ setTimeout(async () => {
     uiState = { ...rest, ...(loadGlobalAudioState() ?? {}) };
   }
 
-  initUI(document.getElementById('ui'), uiState, effectiveData?.sceneSlot ?? null, previewPreset);
+  initUI(document.getElementById('ui'), uiState, effectiveData?.sceneSlot ?? null, previewPreset, effectiveData?.editingSlot ?? null);
   render(getLayers());
 
   // Re-evaluate Three.js layers after Hydra has rendered its first frame.

@@ -366,8 +366,15 @@ export async function buildShareUrl(layers, uiState = {}) {
   return location.origin + location.pathname + `#z=${encoded}`;
 }
 
-export async function saveToUrl(layers, uiState = {}) {
+// editingSlot is a hint only — "these unsaved edits started from this scene" —
+// not a claim that the URL's layers match what's actually stored there. It
+// lets a reload land back on the right scene/dirty-state instead of quietly
+// defaulting to scene 1 (see loadFromUrl and initScenesPane in ui.js).
+// Deliberately not carried by buildShareUrl: a share link's slot number would
+// be meaningless in whoever opens it, and would also mis-set isShareLink.
+export async function saveToUrl(layers, uiState = {}, editingSlot = null) {
   const payload = { layers: layers.map(serializeLayer), ui: uiState };
+  if (editingSlot != null) payload.editingSlot = editingSlot;
   try {
     const encoded = await compressPayload(payload);
     history.replaceState(null, '', location.pathname + `#z=${encoded}`);
