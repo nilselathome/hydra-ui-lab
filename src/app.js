@@ -3,7 +3,7 @@ import { render } from './engine.js';
 import { initUI } from './ui.js';
 import { registerCustomEffects } from './layerDefs.js';
 import {
-  loadFromUrl, deserializeLayers, loadGlobalAudioState,
+  loadFromUrl, deserializeLayers, loadBankSettings,
   loadPresetBank, decodeEncodedScene, sceneKey, getActiveBankId, showWarning,
 } from './state.js';
 
@@ -67,14 +67,14 @@ setTimeout(async () => {
 
   let uiState = effectiveData?.ui ?? {};
   if (previewPreset) {
-    // A bundled preset carries its own soundtrack (see exportBank in state.js) —
-    // use that instead of the visitor's own saved audio prefs.
+    // A bundled preset carries its own soundtrack + autoplay config (see
+    // exportBank in state.js) — use that instead of the visitor's own saved prefs.
     uiState = previewPreset.audio ?? {};
   } else if (!isShareLink) {
-    // Scene slots no longer own audio — ignore any legacy embedded audioTrack/loop
-    // and apply the global audio state instead.
-    const { audioTrack, loopA, loopB, ...rest } = uiState;
-    uiState = { ...rest, ...(loadGlobalAudioState() ?? {}) };
+    // Scene slots no longer own audio/scene-player settings — ignore any legacy
+    // embedded values and apply the active bank's own saved settings instead.
+    const { audioTrack, loopA, loopB, scenePlayerPlaying, scenePlayerInterval, scenePlayerTimings, ...rest } = uiState;
+    uiState = { ...rest, ...(loadBankSettings(getActiveBankId()) ?? {}) };
   }
 
   initUI(document.getElementById('ui'), uiState, effectiveData?.sceneSlot ?? null, previewPreset, effectiveData?.editingSlot ?? null);

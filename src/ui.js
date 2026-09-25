@@ -4,7 +4,7 @@ import { getLayers, addLayer, removeLayer, duplicateLayer, moveLayer, createMod,
 import { render } from './engine.js';
 import {
   saveToUrl, saveSceneToUrl, buildShareUrl, showWarning, showSuccess, encodeState, encodeStateForDirtyCheck, deserializeLayers,
-  getCompressedUrlLength, saveGlobalAudioState, sceneKey, thumbKey, listBanks, getActiveBankId, setActiveBankId,
+  getCompressedUrlLength, saveBankSettings, loadBankSettings, sceneKey, thumbKey, listBanks, getActiveBankId, setActiveBankId,
   createBank, renameBank, duplicateBank, deleteBank, resetAllBanks, exportBank, importBankFile,
   decodeEncodedScene, SCENES_PER_BANK,
 } from './state.js';
@@ -84,10 +84,49 @@ function refreshUrlGauge() {
   }, 250);
 }
 
-// Audio track/loop are global — shared across all scenes, not owned by any one of them.
-function getGlobalAudioState() {
+function getAudioSettings() {
   const { loopA, loopB } = Audio.getLoop();
   return { audioTrack: audioLibraryTrack, loopA, loopB };
+}
+
+// Set by initScenesPane once the scene-player controls exist — lets
+// getBankSettings() below read their live values without hoisting that
+// state to module scope.
+let getScenePlayerState = () => ({ playing: false, interval: 5, timings: '' });
+
+// Audio track/loop and scene-player playing/interval/timings are owned by
+// the active bank (see bankSettingsKey in state.js), not global or per-scene.
+function getBankSettings() {
+  const player = getScenePlayerState();
+  return {
+    ...getAudioSettings(),
+    scenePlayerPlaying:  player.playing,
+    scenePlayerInterval: player.interval,
+    scenePlayerTimings:  player.timings,
+  };
+}
+
+// Connects/restores (or stops) audio per a bank's saved settings. Used both
+// at boot (via uiState — see initAudioPane) and when switching banks
+// mid-session (see switchBank in initScenesPane).
+function applyAudioSettings(settings) {
+  if (!settings?.audioTrack || !libraryTracks.includes(settings.audioTrack)) {
+    audioLibraryTrack = null;
+    Audio.stop();
+    return;
+  }
+  audioLibraryTrack = settings.audioTrack;
+  const url = /^https?:\/\//.test(settings.audioTrack) ? settings.audioTrack : import.meta.env.BASE_URL + settings.audioTrack;
+  (async () => {
+    try {
+      const ok = await Audio.connectUrl(url);
+      if (settings.loopA != null && settings.loopB != null) Audio.restoreLoop(settings.loopA, settings.loopB);
+      _cleanEncoded = getDirtyCheckEncoded();
+      if (!ok) showAutoplayOverlay();
+    } catch (e) {
+      showWarning(e.message ?? 'Audio error');
+    }
+  })();
 }
 
 function getUiState() {
@@ -96,12 +135,11 @@ function getUiState() {
     audioPane:  audioPaneExpanded,
     layersPane: layersPaneExpanded,
     scenesPane: scenesPaneExpanded,
-    ...getGlobalAudioState(),
+    ...getBankSettings(),
   };
 }
 
 function save() {
-  saveGlobalAudioState(getGlobalAudioState());
   if (isPreview()) {
     // Read-only preset preview: never touch localStorage or the #z=/#scene= URL
     // forms — just keep ?preset=&scene= in sync with whatever's on screen.
@@ -110,6 +148,7 @@ function save() {
     refreshUrlGauge();
     return;
   }
+  if (activeBankId !== null) saveBankSettings(activeBankId, getBankSettings());
   const isSaved = activeSlot !== null && _cleanEncoded !== null && getDirtyCheckEncoded() === _cleanEncoded;
   if (isSaved) {
     saveSceneToUrl(activeSlot);
@@ -257,8 +296,9 @@ function clearSlotStorage(slot) {
 }
 
 function getContentEncoded() {
-  // Scenes are layers only — audio is global (see getGlobalAudioState) and
-  // deliberately excluded so switching/saving/copying a scene never touches playback.
+  // Scenes are layers only — audio/scene-player settings are per-bank (see
+  // getBankSettings) and deliberately excluded so switching/saving/copying a
+  // scene never touches playback.
   return encodeState(getLayers());
 }
 
@@ -505,10 +545,10 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
   saveCopyBtn.addEventListener('click', () => {
     if (!isPreview()) return;
     const keepSlot = activeSlot;
-    const bundledAudio = previewBank.audio;
-    const id = importBankFile({ type: 'hydra-bank', version: 2, name: previewBank.name, scenes: previewBank.scenes, thumbs: previewBank.thumbs });
-    // Carry over the preset's soundtrack so it doesn't cut out on exiting preview.
-    if (bundledAudio) saveGlobalAudioState(bundledAudio);
+    // importBankFile persists previewBank.audio (soundtrack + autoplay config)
+    // under the new bank's own settings key — nothing else to carry over here,
+    // since whatever's already connected/playing from the preview keeps going.
+    const id = importBankFile({ type: 'hydra-bank', version: 2, name: previewBank.name, scenes: previewBank.scenes, thumbs: previewBank.thumbs, audio: previewBank.audio });
     previewBank = null;
     activeBankId = id;
     setActiveBankId(id);
@@ -723,6 +763,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     }
     activeSlot = 0;
     _cleanEncoded = getDirtyCheckEncoded();
+    applyBankSettingsToUI(loadBankSettings(id) ?? {});
     rebuild();
     refreshBankSelect();
     refreshSceneButtons();
@@ -822,6 +863,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
   playBtn.addEventListener('click', () => {
     if (scenePlayerRunning) stopScenePlayer();
     else startScenePlayer();
+    save();
   });
 
   const intervalRow = document.createElement('div');
@@ -835,7 +877,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
   const intervalValue = document.createElement('span');
   intervalValue.style.cssText = 'font-size:9px; font-family:monospace; color:rgba(255,255,255,0.4); flex-shrink:0; min-width:28px; text-align:right;';
   intervalValue.textContent = `${intervalSlider.value}s`;
-  intervalSlider.addEventListener('input', () => { intervalValue.textContent = `${intervalSlider.value}s`; });
+  intervalSlider.addEventListener('input', () => { intervalValue.textContent = `${intervalSlider.value}s`; save(); });
   intervalRow.append(intervalLabel, intervalSlider, intervalValue);
 
   const timingInput = document.createElement('input');
@@ -846,10 +888,37 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     border-radius: 2px; color: #fff; font-size: 9px; font-family: monospace;
     padding: 4px 6px; outline: none;
   `;
+  timingInput.addEventListener('input', () => save());
 
   playerWrap.append(playBtn, intervalRow, timingInput);
   content.appendChild(playerWrap);
   updatePlayBtn();
+
+  getScenePlayerState = () => ({
+    playing:  scenePlayerRunning,
+    interval: intervalSlider.valueAsNumber,
+    timings:  timingInput.value,
+  });
+
+  // Applies a bank's saved audio + scene-player settings on a live bank
+  // switch (see switchBank) — reconnects/stops audio and restores the
+  // interval/timings controls, auto-(re)starting the player if it was
+  // saved as playing.
+  function applyBankSettingsToUI(settings) {
+    applyAudioSettings(settings);
+    intervalSlider.value = String(settings.scenePlayerInterval ?? 5);
+    intervalValue.textContent = `${intervalSlider.value}s`;
+    timingInput.value = settings.scenePlayerTimings ?? '';
+    if (settings.scenePlayerPlaying) startScenePlayer(); else stopScenePlayer();
+  }
+
+  // Boot-time restore of this bank's scene-player config (see save() /
+  // getBankSettings) — audio itself was already connected by initAudioPane
+  // from this same uiState, so only the player controls need restoring here.
+  intervalSlider.value = String(uiState.scenePlayerInterval ?? 5);
+  intervalValue.textContent = `${intervalSlider.value}s`;
+  timingInput.value = uiState.scenePlayerTimings ?? '';
+  if (uiState.scenePlayerPlaying) startScenePlayer();
 
   const btnRowStyle = `
     display: flex; gap: 4px; margin: 4px 4px 6px;
@@ -1413,20 +1482,7 @@ function initAudioPane(container, uiState = {}) {
   });
 
   // ── Auto-connect library track from saved state ───────────────────────────
-  if (uiState.audioTrack && libraryTracks.includes(uiState.audioTrack)) {
-    audioLibraryTrack = uiState.audioTrack;
-    const url = /^https?:\/\//.test(uiState.audioTrack) ? uiState.audioTrack : import.meta.env.BASE_URL + uiState.audioTrack;
-    (async () => {
-      try {
-        const ok = await Audio.connectUrl(url);
-        if (uiState.loopA != null && uiState.loopB != null) Audio.restoreLoop(uiState.loopA, uiState.loopB);
-        _cleanEncoded = getDirtyCheckEncoded();
-        if (!ok) showAutoplayOverlay();
-      } catch (e) {
-        showWarning(e.message ?? 'Audio error');
-      }
-    })();
-  }
+  applyAudioSettings(uiState);
   addCollapseAllCtrl(pane);
 }
 

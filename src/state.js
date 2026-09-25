@@ -103,22 +103,6 @@ export function deserializeLayers(dataArray) {
 
 // ── URL encoding ──────────────────────────────────────────────────────────────
 
-const GLOBAL_AUDIO_KEY = 'hydra-global-audio';
-
-// Audio track/loop are global (shared across all scenes), not part of any scene slot.
-export function saveGlobalAudioState(state) {
-  try { localStorage.setItem(GLOBAL_AUDIO_KEY, JSON.stringify(state)); } catch {}
-}
-
-export function loadGlobalAudioState() {
-  try {
-    const raw = localStorage.getItem(GLOBAL_AUDIO_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
 // ── Scene banks ───────────────────────────────────────────────────────────────
 // A bank is a named collection of SCENES_PER_BANK scene slots. Scenes used to be
 // one flat set of slots; banks let that set be duplicated, exported/imported as a
@@ -139,6 +123,45 @@ export function sceneKey(bankId, n) {
 // payload just to drop the thumbnail.
 export function thumbKey(bankId, n) {
   return `${sceneKey(bankId, n)}-thumb`;
+}
+
+// Per-bank audio (Library track/loop) and scene-player (playing/interval/
+// custom timings) settings — each bank remembers its own, so switching banks
+// switches soundtrack and autoplay config along with the scenes, and
+// exportBank()/importBankFile() can bundle them into a preset file that
+// autoplays for visitors with its own soundtrack out of the box.
+export function bankSettingsKey(bankId) {
+  return `hydra-bank-${bankId}-settings`;
+}
+
+export function saveBankSettings(bankId, settings) {
+  try { localStorage.setItem(bankSettingsKey(bankId), JSON.stringify(settings)); } catch {}
+}
+
+export function loadBankSettings(bankId) {
+  try {
+    const raw = localStorage.getItem(bankSettingsKey(bankId));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+const LEGACY_GLOBAL_AUDIO_KEY = 'hydra-global-audio';
+
+// One-time: audio/loop used to be one blob shared across every bank. Move
+// whatever was there onto the bank that's currently active (arbitrary, but
+// as reasonable a home as any — it's whichever bank happens to be loaded
+// when this ships) and drop the legacy key.
+function migrateLegacyAudio(banks) {
+  const legacy = localStorage.getItem(LEGACY_GLOBAL_AUDIO_KEY);
+  if (legacy === null) return;
+  const stored = localStorage.getItem(ACTIVE_BANK_KEY);
+  const id = (stored && banks.some(b => b.id === stored)) ? stored : banks[0]?.id;
+  if (id && localStorage.getItem(bankSettingsKey(id)) === null) {
+    localStorage.setItem(bankSettingsKey(id), legacy);
+  }
+  localStorage.removeItem(LEGACY_GLOBAL_AUDIO_KEY);
 }
 
 function readBanks() {
@@ -171,7 +194,9 @@ function migrateLegacyScenes() {
 
 export function listBanks() {
   migrateLegacyScenes();
-  return readBanks() ?? [];
+  const banks = readBanks() ?? [];
+  migrateLegacyAudio(banks);
+  return banks;
 }
 
 export function getActiveBankId() {
@@ -223,7 +248,11 @@ export function duplicateBank(id) {
   for (let i = 0; i < SCENES_PER_BANK; i++) {
     const raw = localStorage.getItem(sceneKey(id, i));
     if (raw !== null) localStorage.setItem(sceneKey(newId, i), raw);
+    const thumb = localStorage.getItem(thumbKey(id, i));
+    if (thumb !== null) localStorage.setItem(thumbKey(newId, i), thumb);
   }
+  const settings = localStorage.getItem(bankSettingsKey(id));
+  if (settings !== null) localStorage.setItem(bankSettingsKey(newId), settings);
   return newId;
 }
 
@@ -240,6 +269,7 @@ export function deleteBank(id) {
     localStorage.removeItem(sceneKey(id, i));
     localStorage.removeItem(thumbKey(id, i));
   }
+  localStorage.removeItem(bankSettingsKey(id));
   if (localStorage.getItem(ACTIVE_BANK_KEY) === id) setActiveBankId(banks[0].id);
   return getActiveBankId();
 }
@@ -250,15 +280,17 @@ export function resetAllBanks() {
       localStorage.removeItem(sceneKey(b.id, i));
       localStorage.removeItem(thumbKey(b.id, i));
     }
+    localStorage.removeItem(bankSettingsKey(b.id));
   });
   localStorage.removeItem(BANKS_KEY);
   localStorage.removeItem(ACTIVE_BANK_KEY);
 }
 
-// Bundles the exporter's current global audio state (Library track/loop —
-// see saveGlobalAudioState) alongside the scenes, so a showcase link can carry
-// its own soundtrack. Only Library-selected tracks are captured this way
-// (uploads/typed URLs aren't shareable or persisted today either).
+// Bundles the bank's own audio/scene-player settings (see bankSettingsKey)
+// alongside its scenes, so a showcase link can carry its own soundtrack and
+// autoplay for visitors out of the box. Only Library-selected tracks are
+// captured this way (uploads/typed URLs aren't shareable or persisted today
+// either).
 export function exportBank(id) {
   const bank = listBanks().find(b => b.id === id);
   const scenes = [];
@@ -267,7 +299,7 @@ export function exportBank(id) {
     scenes.push(localStorage.getItem(sceneKey(id, i)));
     thumbs.push(localStorage.getItem(thumbKey(id, i)));
   }
-  return { type: 'hydra-bank', version: 2, name: bank?.name ?? 'Bank', scenes, thumbs, audio: loadGlobalAudioState() };
+  return { type: 'hydra-bank', version: 2, name: bank?.name ?? 'Bank', scenes, thumbs, audio: loadBankSettings(id) };
 }
 
 // Creates a new bank from an exported/preset bank object and writes its scenes.
@@ -283,6 +315,7 @@ export function importBankFile(data) {
   data.thumbs?.slice(0, SCENES_PER_BANK).forEach((thumb, i) => {
     if (thumb !== null && thumb !== undefined) localStorage.setItem(thumbKey(id, i), thumb);
   });
+  if (data.audio) saveBankSettings(id, data.audio);
   return id;
 }
 
