@@ -106,7 +106,9 @@ function createThreeLayer(layer) {
   const w = window.innerWidth;
   const h = window.innerHeight;
 
-  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+  // antialias off — MSAA is expensive on mobile GPUs and this canvas is composited
+  // over Hydra via CSS blend mode, where aliasing is barely noticeable anyway.
+  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: false });
   renderer.setSize(w, h);
   renderer.setClearColor(0x000000, 0);
 

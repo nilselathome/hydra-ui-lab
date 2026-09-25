@@ -16,7 +16,11 @@ canvas.width  = window.innerWidth  * dpr;
 canvas.height = window.innerHeight * dpr;
 
 // makeGlobal: true injects osc, shape, voronoi, noise, gradient, src, o0-o3, etc. into window
-new Hydra({ canvas, detectAudio: false, makeGlobal: true, pb: true });
+// precision: hydra-synth defaults to 'highp' on iOS (mediump everywhere else), which costs
+// real GPU power for no visible benefit in most chains — opt into the cheaper default.
+// numOutputs: 1 — engine.js only ever renders to o0; Hydra ticks/renders every output it
+// creates each frame, so the default of 4 wastes 3 full-canvas passes per frame.
+new Hydra({ canvas, detectAudio: false, makeGlobal: true, pb: true, precision: 'mediump', numOutputs: 1 });
 registerCustomEffects(); // chroma/scanlines/grain glsl — needs Hydra's globals, must run before any layer using them builds
 
 // Hydra needs a tick before the GL context is ready to accept chains
