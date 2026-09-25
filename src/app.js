@@ -8,7 +8,10 @@ import {
 } from './state.js';
 
 const canvas = document.getElementById('hydraCanvas');
-const dpr = window.devicePixelRatio || 1;
+// Capped at 2x — uncapped DPR (3x on most iPhones) blows past iOS Safari's
+// WebGL memory ceiling once Hydra's per-layer framebuffers stack up, crashing
+// the tab (WebContent process OOM, shows as "A problem repeatedly occurred").
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
 canvas.width  = window.innerWidth  * dpr;
 canvas.height = window.innerHeight * dpr;
 
