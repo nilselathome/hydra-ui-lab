@@ -26,9 +26,41 @@
       overflow-y: auto;
       overflow-x: hidden;
       scrollbar-gutter: stable;
+      /* No elastic rubber-band bounce past the top/bottom edge, and a
+         scroll that hits either edge doesn't chain through to the canvas
+         behind it — scrollTop already can't go negative, this just stops
+         the bounce *look* some trackpads/browsers add on top of that.
+         VSCode-sidebar-style: a hard edge, not a springy one. */
+      overscroll-behavior-y: contain;
+      /* Scroll-anchor headroom: the browser clamps scrollTop to
+         scrollHeight - clientHeight, so a target near the end of a short
+         pane/layer list can never actually reach the top of the viewport —
+         there's no content left below it to scroll into. This padding is
+         pure slack, always available to scroll into, so any anchor target
+         can be reached regardless of what's below it. */
+      padding-bottom: 400px;
+      /* Scroll-snap starts OFF — armed only while the user is actively
+         wheel/touch-scrolling (see the 'wheel'/'touchmove' listeners in
+         initUI, src/ui.js), then switched off again shortly after. Some
+         browsers re-settle scrollTop toward the nearest snap point on an
+         idle timer completely outside our control — if snap were left on
+         permanently, that correction could silently fire long after the
+         user stopped scrolling (e.g. right as a scene switch reads the
+         current scrollTop to anchor from), clobbering it with a stale
+         value the user never asked for. Anchors to the top of each
+         top-level pane (Audio/Scenes/Add Layer/Layers) — see
+         #ui > .tp-rotv below. */
+      scroll-snap-type: none;
       /* Tweakpane renders inside here */
       user-select: none;
       -webkit-user-select: none;
+    }
+
+    /* Each top-level Tweakpane pane is a direct .tp-rotv child of #ui —
+       nested folders use a different class, so this only anchors pane
+       boundaries, not every fold inside them. */
+    #ui > .tp-rotv {
+      scroll-snap-align: start;
     }
 
     /* ...but keep selection working in actual text-entry fields (Tweakpane's

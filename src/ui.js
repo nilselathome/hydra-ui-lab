@@ -23,6 +23,8 @@ function formatTime(s) {
 
 let addPane = null;
 let layersPane = null;
+let audioPane = null;
+let scenesPane = null;
 let uiContainer = null;
 let addPaneExpanded    = true;
 let audioPaneExpanded  = true;
@@ -129,14 +131,42 @@ function applyAudioSettings(settings) {
   })();
 }
 
-function getUiState() {
+// Just the four top-level pane fold states — tiny (4 booleans) and purely
+// cosmetic, so unlike getBankSettings() it's safe to travel with every
+// saved/shared scene (bank slots, exports, presets), not just the
+// transient full share URL. Kept separate from getBankSettings() on
+// purpose: audio track/loop/scene-player settings are deliberately
+// per-bank, not per-scene (see getBankSettings), and folding them into
+// every scene slot would 16x-duplicate them per bank and reintroduce the
+// "switching scenes touches playback" coupling that was deliberately
+// avoided (see getContentEncoded).
+function getPaneUiState() {
   return {
     addPane:    addPaneExpanded,
     audioPane:  audioPaneExpanded,
     layersPane: layersPaneExpanded,
     scenesPane: scenesPaneExpanded,
-    ...getBankSettings(),
   };
+}
+
+// Applies a saved/shared scene's pane-fold state to the actual panes —
+// only needed when switching scenes live (goToScene/switchBank/paste);
+// initUI already reads the same fields once at boot. Missing fields (an
+// older scene saved before this existed) fall back to today's hardcoded
+// defaults, same as a fresh session.
+function applyPaneUiState(ui = {}) {
+  addPaneExpanded    = ui.addPane    ?? true;
+  audioPaneExpanded  = ui.audioPane  ?? false;
+  layersPaneExpanded = ui.layersPane ?? true;
+  scenesPaneExpanded = ui.scenesPane ?? true;
+  if (addPane)    addPane.expanded    = addPaneExpanded;
+  if (audioPane)  audioPane.expanded  = audioPaneExpanded;
+  if (layersPane) layersPane.expanded = layersPaneExpanded;
+  if (scenesPane) scenesPane.expanded = scenesPaneExpanded;
+}
+
+function getUiState() {
+  return { ...getPaneUiState(), ...getBankSettings() };
 }
 
 function save() {
@@ -296,10 +326,11 @@ function clearSlotStorage(slot) {
 }
 
 function getContentEncoded() {
-  // Scenes are layers only — audio/scene-player settings are per-bank (see
-  // getBankSettings) and deliberately excluded so switching/saving/copying a
-  // scene never touches playback.
-  return encodeState(getLayers());
+  // Scenes carry layers + pane-fold UI state (see getPaneUiState — tiny,
+  // purely cosmetic). Audio/scene-player settings stay per-bank (see
+  // getBankSettings) and are deliberately excluded so switching/saving/
+  // copying a scene never touches playback.
+  return encodeState(getLayers(), getPaneUiState());
 }
 
 // Same as getContentEncoded, but ignores a playing text bank's own
@@ -437,6 +468,7 @@ function createSceneContextMenu() {
 function initScenesPane(container, uiState = {}, initialSceneSlot = null, previewData = null, initialEditingSlot = null) {
   scenesPaneExpanded = uiState.scenesPane ?? true;
   const pane = new Pane({ container, title: 'Scenes', expanded: scenesPaneExpanded });
+  scenesPane = pane;
   pane.element.style.marginBottom = '1rem';
   pane.on('fold', (ev) => { scenesPaneExpanded = ev.expanded; save(); });
 
@@ -657,6 +689,14 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     btn.appendChild(label);
     applySlotStyle(btn, label, slotFilled(slot), false, false, slotThumb(slot));
 
+    // Clicking a button focuses it by default, and if it's scrolled out of
+    // view (easy — the grid lives near the top of a long panel) the browser
+    // auto-scrolls #ui to reveal it, as native focus behavior, before our
+    // own click handler (and its scroll-anchor capture) ever runs. That
+    // silently clobbers whatever scrollTop the user actually had. Suppress
+    // the mouse-driven focus (keyboard/Tab focus is untouched) so the
+    // scroll position is still exactly what the user left it at.
+    btn.addEventListener('mousedown', (e) => e.preventDefault());
     btn.addEventListener('click', () => {
       if (_saveAsArmed) { handleSaveAsTarget(slot); return; }
       stopScenePlayer();
@@ -717,11 +757,18 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     if (activeSlot === slot) return;
     const dirty = _cleanEncoded !== null && getDirtyCheckEncoded() !== _cleanEncoded;
     const raw = slotRaw(slot);
+    // Captured before anything below touches state — applyPaneUiState in
+    // particular can collapse/expand top-level panes to match the scene
+    // being switched TO, which shifts/clamps scrollTop as a side effect.
+    // Reading it any later would see that disturbance, not what the user
+    // actually had scrolled to.
+    const anchor = captureScrollAnchor();
     if (raw) {
       if (dirty && !silent && !confirm('Discard unsaved changes?')) return;
       const data = decodeStoredScene(raw);
       if (!data) { showWarning(`Scene ${slot + 1} could not be loaded.`); return; }
       applyState(deserializeLayers(data.layers ?? data));
+      applyPaneUiState(data.ui);
     } else if (dirty && !silent && !isPreview()) {
       // Empty slot + unsaved changes → save current scene here instead of blanking
       writeSlot(slot, getContentEncoded());
@@ -730,7 +777,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     }
     activeSlot = slot;
     _cleanEncoded = getDirtyCheckEncoded();
-    rebuild();
+    rebuild({ resetScroll: true, anchor });
     refreshSceneButtons();
     refreshSaveBtn();
   }
@@ -752,19 +799,21 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
       if (dirty && !confirm('Discard unsaved changes?')) { refreshBankSelect(); return; }
     }
     stopScenePlayer();
+    const anchor = captureScrollAnchor(); // before applyPaneUiState — see goToScene
     activeBankId = id;
     setActiveBankId(id);
     const raw = slotRaw(0);
     if (raw) {
       const data = decodeStoredScene(raw);
       applyState(data ? deserializeLayers(data.layers ?? data) : []);
+      if (data) applyPaneUiState(data.ui);
     } else {
       applyState([]);
     }
     activeSlot = 0;
     _cleanEncoded = getDirtyCheckEncoded();
     applyBankSettingsToUI(loadBankSettings(id) ?? {});
-    rebuild();
+    rebuild({ resetScroll: true, anchor });
     refreshBankSelect();
     refreshSceneButtons();
     refreshSaveBtn();
@@ -1022,6 +1071,8 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
   _pasteSceneBtn = document.createElement('button');
   _pasteSceneBtn.textContent = 'Paste';
   _pasteSceneBtn.style.cssText = btnBaseStyle;
+  // See the scene-grid buttons' mousedown listener above for why.
+  _pasteSceneBtn.addEventListener('mousedown', (e) => e.preventDefault());
   _pasteSceneBtn.addEventListener('click', async () => {
     let text = _clipboard;
     try {
@@ -1032,9 +1083,11 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     if (getLayers().length > 0 && !confirm('Are you sure?')) return;
     const data = parseSceneText(text);
     if (!data) { showWarning('Nothing valid to paste'); return; }
+    const anchor = captureScrollAnchor(); // before applyPaneUiState — see goToScene
     _clipboard = text;
     applyState(deserializeLayers(data.layers ?? data));
-    rebuild();
+    applyPaneUiState(data.ui);
+    rebuild({ resetScroll: true, anchor });
     refreshSceneButtons();
   });
 
@@ -1052,13 +1105,15 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
 
   _clearSceneBtn = document.createElement('button');
   _clearSceneBtn.style.cssText = btnBaseStyle;
+  _clearSceneBtn.addEventListener('mousedown', (e) => e.preventDefault());
   _clearSceneBtn.addEventListener('click', () => {
     if (isPreview() || activeSlot === null) return;
     if (!confirm('Are you sure?')) return;
     stopScenePlayer();
+    const anchor = captureScrollAnchor();
     clearSlotStorage(activeSlot);
     applyState([]);
-    rebuild();
+    rebuild({ resetScroll: true, anchor });
     _cleanEncoded = getDirtyCheckEncoded();
     refreshSceneButtons();
     refreshSaveBtn();
@@ -1152,6 +1207,21 @@ export function initUI(container, uiState = {}, initialSceneSlot = null, preview
 
   ensureUiHiddenIndicator();
 
+  // Arms scroll-snap only for the duration of an actual wheel/touch
+  // gesture (+ a brief settle window after), then switches it off again —
+  // see the scroll-snap-type comment in index.html for why it can't just
+  // stay on. 'wheel'/'touchmove' only ever fire from real user input, never
+  // from our own or the browser's own programmatic scrollTop changes, so
+  // this can't be self-triggered into staying on.
+  let snapDisarmTimer = null;
+  const armScrollSnap = () => {
+    uiContainer.style.scrollSnapType = 'y proximity';
+    clearTimeout(snapDisarmTimer);
+    snapDisarmTimer = setTimeout(() => { uiContainer.style.scrollSnapType = 'none'; }, 400);
+  };
+  uiContainer.addEventListener('wheel', armScrollSnap, { passive: true });
+  uiContainer.addEventListener('touchmove', armScrollSnap, { passive: true });
+
   document.addEventListener('keydown', (e) => {
     // Ctrl+R — "restart everything" (see restartEverything), not a page
     // reload. Deliberately Ctrl only, not Cmd — Cmd+R is too close to muscle
@@ -1240,6 +1310,7 @@ export function initUI(container, uiState = {}, initialSceneSlot = null, preview
 function initAudioPane(container, uiState = {}) {
   audioPaneExpanded = uiState.audioPane ?? false;
   const pane = new Pane({ container, title: 'Audio', expanded: audioPaneExpanded });
+  audioPane = pane;
   pane.element.style.marginBottom = '1rem';
   pane.on('fold', (ev) => { audioPaneExpanded = ev.expanded; save(); });
 
@@ -2383,8 +2454,8 @@ async function onChange() {
   save();
 }
 
-function rebuild() {
-  buildLayersUI();
+function rebuild(opts) {
+  buildLayersUI(opts);
   render(getLayers());
   save();
 }
@@ -2418,15 +2489,114 @@ function addCollapseAllCtrl(paneOrFolder) {
   titleBtn.appendChild(ctrl);
 }
 
-function buildLayersUI() {
+// A scene swap can't be "smoothly" scrolled into place — the layer stack
+// underneath is a different shape, so there's nothing to animate a
+// transition between. Instead: fade+blur the whole Layers pane out
+// (~300ms), rebuild + jump scroll while it's obscured, then fade+sharpen
+// back in (~150ms), and it reads as "this pane just changed" rather than
+// a hard cut.
+function fadeLayersPane(run) {
+  const el = layersPane?.element;
+  if (!el || typeof el.animate !== 'function') { run(); return; }
+  // TEMP — durations being dialed in for testing (currently 300/250).
+  el.animate(
+    [
+      { opacity: 1, filter: 'blur(0px)', transform: 'scale(1)' },
+      { opacity: 0, filter: 'blur(16px)', transform: 'scale(0.9)' },
+    ],
+    { duration: 300, easing: 'ease-in', fill: 'forwards' },
+  )
+    .finished
+    .catch(() => {}) // animation can be interrupted (e.g. rapid scene changes) — still rebuild
+    .then(() => {
+      run();
+      el.animate(
+        [
+          { opacity: 0, filter: 'blur(16px)', transform: 'scale(0.9)' },
+          { opacity: 1, filter: 'blur(0px)', transform: 'scale(1)' },
+        ],
+        { duration: 250, easing: 'ease-out', fill: 'forwards' },
+      );
+    });
+}
+
+// Finds which top-level pane (Audio/Scenes/Add Layer/Layers, in that DOM
+// order) the current scrollTop is actually inside — the last one whose top
+// edge is above the scroll position — plus, if that pane is Layers, which
+// child layer folder (by position, top of panel = front of stack) is
+// likewise in view. Captured BEFORE a scene swap tears anything down, so
+// it reflects what the user was actually looking at.
+function captureScrollAnchor() {
+  if (!uiContainer) return null;
+  const scrollTop = uiContainer.scrollTop;
+  const topPanes = [audioPane, scenesPane, addPane, layersPane].filter(Boolean);
+  let pane = topPanes[0] ?? null;
+  for (const p of topPanes) {
+    if (p.element.offsetTop <= scrollTop + 1) pane = p;
+  }
+  let layerIndex = null;
+  if (pane === layersPane) {
+    layersPane.children.forEach((f, i) => {
+      if (f.element.offsetTop <= scrollTop + 1) layerIndex = i;
+    });
+  }
+  return { pane, layerIndex };
+}
+
+// `resetScroll` — true for actions that swap in a different scene's layer
+// stack (goToScene, switchBank, paste/clear scene, scene-player advance).
+// A stale pixel scrollTop from the previous scene points at arbitrary
+// content once the stack underneath it has changed, so instead of
+// preserving it we re-anchor to whatever pane (and, within Layers, roughly
+// which layer folder by position) was active right before the swap — see
+// captureScrollAnchor. Falls back to the top of the Layers pane if nothing
+// more specific was in view. In-place edits (add/remove a param, toggle a
+// fold, drag a slider) still preserve the exact scrollTop as before and
+// skip the fade.
+//
+// `opts.anchor`, when resetting, should be pre-captured by the CALLER
+// before it touches any state — critically, before applyPaneUiState(),
+// which collapses/expands top-level panes to match the scene being
+// switched TO and can itself shift/clamp scrollTop as a side effect of
+// that resize. Capturing here (after such a call already ran) would read
+// an already-disturbed position. Falls back to capturing it here only if
+// the caller didn't (defensive, shouldn't normally happen).
+function buildLayersUI(opts = {}) {
+  if (opts.resetScroll) {
+    const anchor = opts.anchor ?? captureScrollAnchor();
+    fadeLayersPane(() => buildLayersUIInner({ ...opts, anchor }));
+  } else {
+    buildLayersUIInner(opts);
+  }
+}
+
+function buildLayersUIInner({ resetScroll = false, anchor = null } = {}) {
   const scrollTop = uiContainer?.scrollTop ?? 0;
+  const restoreScroll = () => {
+    if (!uiContainer) return;
+    if (!resetScroll) { uiContainer.scrollTop = scrollTop; return; }
+    let target = anchor?.pane?.element?.offsetTop ?? layersPane?.element?.offsetTop ?? 0;
+    if (anchor?.pane === layersPane && anchor.layerIndex != null && layersPane.children.length > 0) {
+      const folder = layersPane.children[Math.min(anchor.layerIndex, layersPane.children.length - 1)];
+      if (folder) target = folder.element.offsetTop;
+    }
+    // A layer folder isn't itself a scroll-snap point (only the four
+    // top-level panes are — see #ui > .tp-rotv in index.html), so with
+    // scroll-snap active the browser can "correct" this jump to whatever
+    // real snap point it considers nearest once things settle — for a
+    // short pane/scene that's often the very top one. Suspend snapping for
+    // this one jump so the intended target actually sticks.
+    uiContainer.style.scrollSnapType = 'none';
+    uiContainer.scrollTop = target;
+    requestAnimationFrame(() => requestAnimationFrame(() => { uiContainer.style.scrollSnapType = ''; }));
+  };
 
   while (layersPane.children.length > 0) {
     layersPane.remove(layersPane.children[0]);
   }
 
   const layers = getLayers();
-  if (layers.length === 0) return;
+  if (layers.length === 0) { requestAnimationFrame(restoreScroll); return; }
 
   // ── Layer list (Photoshop order: top of panel = front of stack) ──
   const displayOrder = [...layers].reverse();
@@ -2659,5 +2829,5 @@ function buildLayersUI() {
     }
   });
 
-  requestAnimationFrame(() => { if (uiContainer) uiContainer.scrollTop = scrollTop; });
+  requestAnimationFrame(restoreScroll);
 }
