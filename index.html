@@ -17,8 +17,15 @@
       top: 12px;
       right: 12px;
       z-index: 9999;
+      /* Fixed width + reserved scrollbar gutter so the panel doesn't visibly
+         resize as layer/scene content changes height (scrollbar appearing/
+         disappearing) or width (long labels, dynamic editors) during playback. */
+      width: 300px;
+      --tp-base-width: 300px;
       max-height: calc(100vh - 24px);
       overflow-y: auto;
+      overflow-x: hidden;
+      scrollbar-gutter: stable;
       /* Tweakpane renders inside here */
       user-select: none;
       -webkit-user-select: none;
