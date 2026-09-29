@@ -2182,7 +2182,8 @@ function addGlslEditor(folder, layer) {
 // `folderEl` — the Tweakpane folder's DOM element to append into
 // `onchange` — called after each control-point move
 function buildBezierEditor(anim, folderEl, onchange) {
-  const W = 112, H = 80, PAD = 8, R = 5;
+  let W = 112;
+  const H = 80, PAD = 8, R = 5;
   // Y axis allows slight overshoot: bezier Y maps [−0.5, 1.5] → canvas [H, 0]
   const Y_MIN = -0.5, Y_MAX = 1.5, Y_RANGE = Y_MAX - Y_MIN;
 
@@ -2198,13 +2199,24 @@ function buildBezierEditor(anim, folderEl, onchange) {
   const canvas = document.createElement('canvas');
   canvas.width  = W;
   canvas.height = H;
-  canvas.style.cssText = `display:block; width:${W}px; height:${H}px; cursor:crosshair;
+  canvas.style.cssText = `display:block; width:100%; height:${H}px; cursor:crosshair;
     background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.1); border-radius:2px;`;
 
   function draw() {
     const [x1, y1, x2, y2] = anim.bezier;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, W, H);
+
+    // Playhead — dim green bar sweeping left→right in sync with `speed`,
+    // using the same ping-pong phase the bezier animate mode itself runs on.
+    const raw   = ((window.time ?? 0) * anim.speed) % 2;
+    const phase = raw <= 1 ? raw : 2 - raw;
+    const [barX] = toCanvas(phase, 0);
+    ctx.fillStyle = 'rgba(70, 200, 110, 0.14)';
+    ctx.fillRect(barX - 5, 0, 10, H);
+    ctx.strokeStyle = 'rgba(70, 200, 110, 0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(barX, 0); ctx.lineTo(barX, H); ctx.stroke();
 
     // Guide lines from anchors to handles
     ctx.strokeStyle = 'rgba(255,255,255,0.18)';
@@ -2282,9 +2294,24 @@ function buildBezierEditor(anim, folderEl, onchange) {
   window.addEventListener('touchmove',  onMove, { ...sig, passive: false });
   window.addEventListener('mouseup',    onUp,   sig);
   window.addEventListener('touchend',   onUp,   sig);
+
+  // Canvas resolution tracks the wrap's actual (100%-of-parent) width.
+  const ro = new ResizeObserver(() => {
+    const w = Math.round(wrap.clientWidth);
+    if (w > 0 && w !== W) { W = w; canvas.width = W; draw(); }
+  });
+  ro.observe(wrap);
+
+  // Playhead needs a continuous redraw loop while this editor is mounted.
+  let rafId = requestAnimationFrame(function tick() {
+    draw();
+    rafId = requestAnimationFrame(tick);
+  });
+
   // Clean up when the canvas is removed from the DOM (on rebuild)
-  new MutationObserver(() => { if (!canvas.isConnected) ac.abort(); })
-    .observe(document.body, { childList: true, subtree: true });
+  new MutationObserver(() => {
+    if (!canvas.isConnected) { ac.abort(); ro.disconnect(); cancelAnimationFrame(rafId); }
+  }).observe(document.body, { childList: true, subtree: true });
 
   // Preset buttons
   const presets = [
