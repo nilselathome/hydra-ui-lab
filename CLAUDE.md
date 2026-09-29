@@ -22,7 +22,6 @@ This is a browser-based **Hydra Synth** playground for live coding generative vi
 ### Entry Points
 
 - **`index.html`** — Main playground. Multi-layer compositing system: a base oscillator layer plus dynamically added layers (Oscillator, Shape, Voronoi). Each layer renders to a Hydra output node (`o0`–`o3`) and is composited using blend modes (add/blend/multiply/difference). Tweakpane bindings control all parameters in real time.
-- **`index2.html`** — Minimal test file with a single oscillator, no UI.
 
 ### src/main.js
 
