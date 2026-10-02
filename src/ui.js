@@ -404,7 +404,11 @@ function injectBlinkStyle() {
   if (document.getElementById('scene-blink-style')) return;
   const style = document.createElement('style');
   style.id = 'scene-blink-style';
-  style.textContent = '@keyframes scene-slot-blink { 0%,100% { border-color:rgba(255,255,255,0.1); color:rgba(255,255,255,0.25); } 50% { border-color:rgba(255,150,40,0.9); color:rgba(255,180,60,0.95); } }';
+  style.textContent = `
+    @keyframes scene-slot-blink { 0%,100% { border-color:rgba(255,255,255,0.1); color:rgba(255,255,255,0.25); } 50% { border-color:rgba(255,150,40,0.9); color:rgba(255,180,60,0.95); } }
+    .scene-slot { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+    .scene-slot[data-dragging="1"] { opacity: 0.35; }
+  `;
   document.head.appendChild(style);
 }
 
@@ -735,11 +739,129 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
 
   _sceneButtons = [];
 
+  // ── Drag to reorder (insert-and-shift) ─────────────────────────────────────
+  // Pointer-based so it works for mouse and touch: a mouse drag starts after
+  // a few px of movement, touch after a ~300ms stationary press (so a normal
+  // swipe still scrolls the panel). Only filled slots can be picked up; any
+  // slot (empty or not) is a valid drop target.
+  const DRAG_HOLD_MS = 300, DRAG_MOVE_PX = 5, HOLD_CANCEL_PX = 8;
+  let slotDrag = null;          // { from, pointerId, pointerType, startX, startY, active, timer, ghost, over }
+  let suppressSlotClick = false;
+
+  function slotIndexAt(x, y) {
+    const el = document.elementFromPoint(x, y)?.closest('.scene-slot');
+    return el ? _sceneButtons.indexOf(el) : -1;
+  }
+
+  // Insertion marker: a vertical line in the gap where the scene will land —
+  // after the target when moving forward (the scene ends up at that slot),
+  // before it when moving back.
+  function setDropTarget(i) {
+    slotDrag.over = i;
+    const line = slotDrag.line;
+    if (i < 0 || i === slotDrag.from) { line.style.display = 'none'; return; }
+    const r = _sceneButtons[i].getBoundingClientRect();
+    const x = i > slotDrag.from ? r.right + 2 : r.left - 2;
+    Object.assign(line.style, { display: 'block', left: `${x - 1.5}px`, top: `${r.top}px`, height: `${r.height}px` });
+  }
+
+  function beginSlotDrag(x, y) {
+    const src = _sceneButtons[slotDrag.from];
+    const r = src.getBoundingClientRect();
+    const ghost = src.cloneNode(true);
+    ghost.removeAttribute('data-dragging');
+    ghost.style.cssText += `;position:fixed;left:0;top:0;width:${r.width}px;height:${r.height}px;margin:0;opacity:0.85;pointer-events:none;z-index:100000;box-shadow:0 6px 18px rgba(0,0,0,0.6);transition:none;`;
+    ghost._dx = x - r.left; ghost._dy = y - r.top;
+    ghost.style.transform = `translate(${x - ghost._dx}px, ${y - ghost._dy}px)`;
+    document.body.appendChild(ghost);
+    const line = document.createElement('div');
+    line.style.cssText = 'position:fixed;display:none;width:3px;border-radius:2px;background:rgba(255,150,40,0.95);box-shadow:0 0 6px rgba(255,150,40,0.8);pointer-events:none;z-index:100000;';
+    document.body.appendChild(line);
+    src.setAttribute('data-dragging', '1');
+    slotDrag.ghost = ghost;
+    slotDrag.line = line;
+    slotDrag.active = true;
+    navigator.vibrate?.(10);
+  }
+
+  function endSlotDrag(commit) {
+    if (!slotDrag) return;
+    clearTimeout(slotDrag.timer);
+    const { from, over, active, ghost, line } = slotDrag;
+    ghost?.remove();
+    line?.remove();
+    _sceneButtons[from].removeAttribute('data-dragging');
+    slotDrag = null;
+    if (!active) return;
+    suppressSlotClick = true; // swallow the click the browser fires after pointerup
+    setTimeout(() => { suppressSlotClick = false; }, 50);
+    if (commit && over >= 0 && over !== from) moveScene(from, over);
+  }
+
+  function onSlotPointerDown(e, slot) {
+    if (isPreview() || _saveAsArmed || !slotFilled(slot)) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    slotDrag = { from: slot, pointerId: e.pointerId, pointerType: e.pointerType, startX: e.clientX, startY: e.clientY, active: false, timer: null, ghost: null, over: -1 };
+    if (e.pointerType !== 'mouse') {
+      slotDrag.timer = setTimeout(() => { if (slotDrag && !slotDrag.active) beginSlotDrag(slotDrag.startX, slotDrag.startY); }, DRAG_HOLD_MS);
+    }
+  }
+
+  document.addEventListener('pointermove', (e) => {
+    if (!slotDrag || e.pointerId !== slotDrag.pointerId) return;
+    const dist = Math.hypot(e.clientX - slotDrag.startX, e.clientY - slotDrag.startY);
+    if (!slotDrag.active) {
+      if (slotDrag.pointerType === 'mouse') {
+        if (dist > DRAG_MOVE_PX) beginSlotDrag(e.clientX, e.clientY);
+      } else if (dist > HOLD_CANCEL_PX) {
+        clearTimeout(slotDrag.timer); // moved before the hold fired — it's a scroll
+        slotDrag = null;
+      }
+      if (!slotDrag?.active) return;
+    }
+    const g = slotDrag.ghost;
+    g.style.transform = `translate(${e.clientX - g._dx}px, ${e.clientY - g._dy}px)`;
+    setDropTarget(slotIndexAt(e.clientX, e.clientY));
+  });
+  document.addEventListener('pointerup',     (e) => { if (slotDrag && e.pointerId === slotDrag.pointerId) endSlotDrag(true); });
+  document.addEventListener('pointercancel', (e) => { if (slotDrag && e.pointerId === slotDrag.pointerId) endSlotDrag(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && slotDrag) endSlotDrag(false); });
+  // Once a touch drag is live, stop the browser turning further movement into a panel scroll.
+  grid.addEventListener('touchmove', (e) => { if (slotDrag?.active) e.preventDefault(); }, { passive: false });
+
+  // Moves scene `from` to `to`, shifting the scenes in between by one slot
+  // (empty slots shift too). Thumbnails travel with their scenes, and the
+  // active highlight follows whichever scene it was on.
+  function moveScene(from, to) {
+    if (isPreview() || from === to) return;
+    const raws = [], thumbs = [];
+    for (let i = 0; i < SCENE_COUNT; i++) {
+      raws.push(localStorage.getItem(sceneKey(activeBankId, i)));
+      thumbs.push(localStorage.getItem(thumbKey(activeBankId, i)));
+    }
+    raws.splice(to, 0, raws.splice(from, 1)[0]);
+    thumbs.splice(to, 0, thumbs.splice(from, 1)[0]);
+    for (let i = 0; i < SCENE_COUNT; i++) {
+      if (raws[i] !== null) localStorage.setItem(sceneKey(activeBankId, i), raws[i]);
+      else localStorage.removeItem(sceneKey(activeBankId, i));
+      if (thumbs[i] !== null) localStorage.setItem(thumbKey(activeBankId, i), thumbs[i]);
+      else localStorage.removeItem(thumbKey(activeBankId, i));
+    }
+    if (activeSlot !== null) {
+      if (activeSlot === from) activeSlot = to;
+      else if (from < to && activeSlot > from && activeSlot <= to) activeSlot--;
+      else if (from > to && activeSlot >= to && activeSlot < from) activeSlot++;
+    }
+    save(); // keeps the #scene= URL on the moved slot
+    refreshSceneButtons();
+  }
+
   for (let slot = 0; slot < SCENE_COUNT; slot++) {
     const btn    = document.createElement('button');
     const label  = document.createElement('span');
     label.textContent = String(slot + 1); // display 1-16, index 0-15
     btn._label = label;
+    btn.className = 'scene-slot';
     btn.appendChild(label);
     applySlotStyle(btn, label, slotFilled(slot), false, false, slotThumb(slot));
 
@@ -752,12 +874,16 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     // scroll position is still exactly what the user left it at.
     btn.addEventListener('mousedown', (e) => e.preventDefault());
     btn.addEventListener('click', () => {
+      if (suppressSlotClick) return; // the click that ends a drag
       if (_saveAsArmed) { handleSaveAsTarget(slot); return; }
       stopScenePlayer();
       goToScene(slot);
     });
 
+    btn.addEventListener('pointerdown', (e) => onSlotPointerDown(e, slot));
+
     btn.addEventListener('contextmenu', (e) => {
+      if (slotDrag) { e.preventDefault(); return; } // touch long-press = drag, not the menu
       if (isPreview() || !slotFilled(slot)) return; // nothing to do on empty/read-only slots
       e.preventDefault();
       contextMenu.show(slot, e.clientX, e.clientY);
