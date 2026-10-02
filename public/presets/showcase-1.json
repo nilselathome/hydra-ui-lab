@@ -43,7 +43,7 @@
     "loopA": null,
     "loopB": null,
     "scenePlayerPlaying": true,
-    "scenePlayerInterval": 8,
+    "scenePlayerInterval": 2,
     "scenePlayerTimings": ""
   }
 }
