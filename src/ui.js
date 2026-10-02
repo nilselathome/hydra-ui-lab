@@ -57,6 +57,7 @@ let uiAnim = null;
 function setUiVisible(visible) {
   uiVisible = visible;
   if (uiHiddenIndicator) uiHiddenIndicator.style.display = visible ? 'none' : 'flex';
+  if (!visible) wakeUiHiddenIndicator();
   if (!uiContainer) return;
   uiAnim?.cancel(); // interrupted hide/show — start from the natural state
   uiAnim = null;
@@ -93,10 +94,29 @@ function ensureUiHiddenIndicator() {
     border: 1px solid rgba(255,255,255,0.25); border-radius: 4px;
     color: rgba(255,255,255,0.8); font-size: 11px; font-family: monospace;
     padding: 6px 10px; cursor: pointer;
+    opacity: 0.75; transition: opacity 0.4s ease;
   `;
   el.addEventListener('click', () => setUiVisible(true));
   document.body.appendChild(el);
   uiHiddenIndicator = el;
+  // Any user activity wakes it (75%, or 100% while hovered/touched); it
+  // fades out after a few idle seconds so it never sits over a capture.
+  ['mousemove', 'pointerdown', 'touchstart', 'click', 'keydown'].forEach(t =>
+    document.addEventListener(t, wakeUiHiddenIndicator, { passive: true, capture: true }));
+}
+
+const UI_INDICATOR_IDLE_MS = 3000;
+let _indicatorIdleTimer = null;
+
+function wakeUiHiddenIndicator(e) {
+  const el = uiHiddenIndicator;
+  if (!el || uiVisible) return;
+  const direct = e?.target instanceof Node && el.contains(e.target);
+  el.style.opacity = direct || el.matches(':hover') ? '1' : '0.75';
+  clearTimeout(_indicatorIdleTimer);
+  _indicatorIdleTimer = setTimeout(() => {
+    if (!el.matches(':hover')) el.style.opacity = '0';
+  }, UI_INDICATOR_IDLE_MS);
 }
 
 function refreshUrlGauge() {
