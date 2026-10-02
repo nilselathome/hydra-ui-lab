@@ -36,6 +36,7 @@ let audioLibraryTrack  = null; // filename of active library track, or null
 // restartEverything() below reach into it without hoisting all that state
 // to module scope.
 let restartScenePlayer = () => {};
+let pauseScenePlayerForEdit = () => {}; // set by initScenesPane; used by the Layers-pane lock banner
 
 // Set by initScenesPane once goToScene exists — lets the ArrowLeft/ArrowRight
 // hotkeys (see initUI) step the active scene without hoisting that state.
@@ -618,7 +619,8 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
   });
 
   const saveCopyBtn = document.createElement('button');
-  saveCopyBtn.textContent = 'Save a copy';
+  saveCopyBtn.textContent = 'Copy to browser storage';
+  saveCopyBtn.title = 'Copies this preset into a new local bank you can edit and save to';
   saveCopyBtn.style.cssText = bankBtnStyle + ';flex:1;display:none;';
   saveCopyBtn.addEventListener('click', () => {
     if (!isPreview()) return;
@@ -635,7 +637,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     refreshBankSelect();
     refreshSceneButtons();
     refreshSaveBtn();
-    showSuccess('Saved a local copy — now editable');
+    showSuccess('Copied to browser storage — now editable');
   });
 
   bankRow.append(_bankSelect, newBankBtn, renameBankBtn, dupBankBtn, delBankBtn, saveCopyBtn);
@@ -893,6 +895,9 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
   };
 
   function updatePlayBtn() {
+    // Locks the Layers pane controls (see .scene-playing in index.html) —
+    // the next scene swap would overwrite any edit made while it runs.
+    uiContainer?.classList.toggle('scene-playing', scenePlayerRunning);
     if (scenePlayerRunning) {
       playBtn.textContent = '■ Stop';
       playBtn.style.background  = 'rgba(100,220,130,0.15)';
@@ -906,7 +911,12 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     }
   }
 
+  // True while the player was paused via the lock banner (not the Stop
+  // button) — Esc then resumes playback. Any other stop/start clears it.
+  let pausedForEdit = false;
+
   function stopScenePlayer() {
+    pausedForEdit = false;
     if (!scenePlayerRunning) return;
     scenePlayerRunning = false;
     clearTimeout(scenePlayerTimer);
@@ -926,6 +936,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
   }
 
   function startScenePlayer() {
+    pausedForEdit = false;
     const filled = getFilledSlots();
     if (filled.length < 2) { showWarning('Save at least 2 scenes to play.'); return; }
     scenePlayerRunning = true;
@@ -950,6 +961,20 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
     scenePlayerStep++;
     scenePlayerTimer = setTimeout(tick, Math.max(0.1, dur) * 1000);
   };
+
+  pauseScenePlayerForEdit = () => {
+    if (!scenePlayerRunning) return;
+    stopScenePlayer();
+    pausedForEdit = true;
+    save();
+    showSuccess(`Now editing local copy of scene ${(activeSlot ?? 0) + 1}, press esc to resume playback-mode`, 8000);
+  };
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !pausedForEdit) return;
+    startScenePlayer();
+    save();
+  });
 
   const playerWrap = document.createElement('div');
   playerWrap.style.cssText = 'margin: 2px 4px 8px; display:flex; flex-direction:column; gap:5px;';
@@ -1426,7 +1451,23 @@ export function initUI(container, uiState = {}, initialSceneSlot = null, preview
 
   layersPane = new Pane({ container, title: 'Layers', expanded: layersPaneExpanded });
   layersPane.element.style.marginBottom = '1rem';
+  layersPane.element.classList.add('layers-pane');
   layersPane.on('fold', (ev) => { layersPaneExpanded = ev.expanded; save(); });
+
+  // Shown (via CSS) only while the scene player runs, when the Layers
+  // controls are locked. Tap = pause the player and unlock for editing.
+  const lockBanner = document.createElement('button');
+  lockBanner.className = 'scene-lock-banner';
+  lockBanner.innerHTML = '▶ Tap <b style="text-decoration:underline">here</b> to edit this scene';
+  lockBanner.addEventListener('click', () => pauseScenePlayerForEdit());
+  container.insertBefore(lockBanner, layersPane.element);
+  // Locked controls have pointer-events: none, so a tap on one lands on the
+  // pane itself — nudge the banner so it's clear why nothing happened.
+  layersPane.element.addEventListener('pointerdown', (e) => {
+    if (!uiContainer.classList.contains('scene-playing')) return;
+    if (e.target.closest('.tp-fldv_b, .tp-rotv_b')) return;
+    lockBanner.animate?.([{ filter: 'brightness(1)' }, { filter: 'brightness(1.9)' }, { filter: 'brightness(1)' }], { duration: 350 });
+  });
   addCollapseAllCtrl(layersPane);
   buildLayersUI();
 }

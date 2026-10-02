@@ -466,15 +466,15 @@ export async function loadFromUrl() {
 
 // ── Warning toast ─────────────────────────────────────────────────────────────
 
-export function showSuccess(msg) {
-  _showToast(msg, 'rgba(40,160,100,0.95)');
+export function showSuccess(msg, duration) {
+  _showToast(msg, 'rgba(40,160,100,0.95)', duration);
 }
 
 export function showWarning(msg) {
   _showToast(msg, 'rgba(220,60,60,0.92)');
 }
 
-function _showToast(msg, bg) {
+function _showToast(msg, bg, duration = 4000) {
   let el = document.getElementById('hydra-toast');
   if (!el) {
     el = document.createElement('div');
@@ -492,5 +492,5 @@ function _showToast(msg, bg) {
   el.style.background = bg;
   el.style.opacity = '1';
   clearTimeout(el._t);
-  el._t = setTimeout(() => { el.style.opacity = '0'; }, 4000);
+  el._t = setTimeout(() => { el.style.opacity = '0'; }, duration);
 }

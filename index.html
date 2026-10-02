@@ -63,6 +63,23 @@
       scroll-snap-align: start;
     }
 
+    /* Scene player running → Layers pane is read-only (the next swap would
+       overwrite any edit). Dimmed + pointer-events off on everything inside
+       except fold titles, so panes/layers/params can still be scrolled,
+       opened and read. A tap on the sticky banner pauses the player. */
+    .scene-lock-banner { display: none; }
+    #ui.scene-playing .scene-lock-banner {
+      display: block; position: sticky; top: 0; z-index: 5; width: 100%;
+      margin: 0 0 6px; padding: 6px 8px; cursor: pointer; text-align: left;
+      font: 10px monospace; color: rgba(130,240,160,0.95);
+      background: rgba(20,40,28,0.92); border: 1px solid rgba(100,220,130,0.5);
+      border-radius: 3px;
+    }
+    #ui.scene-playing .layers-pane .tp-rotv_c { opacity: 0.55; }
+    #ui.scene-playing .layers-pane .tp-rotv_c * { pointer-events: none; }
+    #ui.scene-playing .layers-pane .tp-rotv_c .tp-fldv_b,
+    #ui.scene-playing .layers-pane .tp-rotv_c .tp-fldv_b * { pointer-events: auto; }
+
     /* ...but keep selection working in actual text-entry fields (Tweakpane's
        own number/text inputs included — they're <input type="text"> too). */
     #ui input[type="text"],
