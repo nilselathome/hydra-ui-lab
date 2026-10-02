@@ -48,12 +48,38 @@ let stepScene = () => {};
 let uiVisible = true;
 let uiHiddenIndicator = null;
 
+// Same fade+blur+scale as the Layers-pane scene swap (see fadeLayersPane):
+// 300ms out, 250ms in.
+const UI_FADED = { opacity: 0, filter: 'blur(16px)', transform: 'scale(0.9)' };
+const UI_SHOWN = { opacity: 1, filter: 'blur(0px)', transform: 'scale(1)' };
+let uiAnim = null;
+
 function setUiVisible(visible) {
   uiVisible = visible;
+  if (uiHiddenIndicator) uiHiddenIndicator.style.display = visible ? 'none' : 'flex';
+  if (!uiContainer) return;
+  uiAnim?.cancel(); // interrupted hide/show — start from the natural state
+  uiAnim = null;
   // visibility, not display: none — keeps the panel's scroll position (and
   // Tweakpane's own internal layout) intact across a hide/show round-trip.
-  if (uiContainer) uiContainer.style.visibility = visible ? '' : 'hidden';
-  if (uiHiddenIndicator) uiHiddenIndicator.style.display = visible ? 'none' : 'flex';
+  if (typeof uiContainer.animate !== 'function') {
+    uiContainer.style.visibility = visible ? '' : 'hidden';
+    return;
+  }
+  if (visible) {
+    uiContainer.style.visibility = '';
+    uiAnim = uiContainer.animate([UI_FADED, UI_SHOWN], { duration: 250, easing: 'ease-out' });
+  } else {
+    const anim = uiContainer.animate([UI_SHOWN, UI_FADED], { duration: 300, easing: 'ease-in', fill: 'forwards' });
+    uiAnim = anim;
+    anim.finished
+      .then(() => {
+        if (uiVisible) return;
+        uiContainer.style.visibility = 'hidden';
+        anim.cancel();
+      })
+      .catch(() => {}); // cancelled by a quick re-show
+  }
 }
 
 function ensureUiHiddenIndicator() {
@@ -593,11 +619,17 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
   });
 
   bankRow.append(_bankSelect, newBankBtn, renameBankBtn, dupBankBtn, delBankBtn, saveCopyBtn);
+
+  const bankLabel = document.createElement('div');
+  bankLabel.textContent = 'bank';
+  bankLabel.style.cssText = 'font-size:9px; font-family:monospace; color:rgba(255,255,255,0.25); margin:6px 4px 0;';
+  bankRow.style.marginTop = '2px';
+  content.appendChild(bankLabel);
   content.appendChild(bankRow);
 
   if (PRESET_BANKS.length) {
     const presetsRow = document.createElement('div');
-    presetsRow.style.cssText = 'display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin:0 4px 6px;';
+    presetsRow.style.cssText = 'display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin:6px 4px 0;';
     const presetsLabel = document.createElement('span');
     presetsLabel.textContent = 'presets:';
     presetsLabel.style.cssText = 'font-size:9px; font-family:monospace; color:rgba(255,255,255,0.25);';
@@ -613,7 +645,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
       });
       presetsRow.appendChild(btn);
     });
-    content.appendChild(presetsRow);
+    content.insertBefore(presetsRow, bankLabel); // presets sit above the bank selector
   }
 
   function refreshBankSelect() {
@@ -645,7 +677,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
       delBankBtn.disabled = onlyOne;
       delBankBtn.style.opacity = onlyOne ? '0.3' : '';
     }
-    [_saveSceneBtn, _clearSceneBtn, _saveAsBtn, clearBtn, exportBtn, importBtn].forEach(btn => {
+    [_saveSceneBtn, _clearSceneBtn, _saveAsBtn, clearBtn, exportBtn, importBtn, copyBankBtn, pasteBankBtn].forEach(btn => {
       if (!btn) return;
       btn.disabled = preview;
       btn.style.opacity = preview ? '0.3' : '';
@@ -1050,8 +1082,48 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
 
   btnRow1.appendChild(clearBtn);
   btnRow1.appendChild(resetBtn);
-  btnRow1.appendChild(exportBtn);
-  btnRow1.appendChild(importBtn);
+
+  // Export/Import belong with the bank selector, not the destructive utility row
+  const bankIoRow = document.createElement('div');
+  bankIoRow.style.cssText = btnRowStyle;
+  bankIoRow.style.marginTop = '14px'; // keep clear of the bank selector's +/✎/⧉/✕ so Export isn't hit by accident
+  exportBtn.title = 'Download this bank as a JSON file';
+  importBtn.title = 'Add a bank from a JSON file';
+
+  // Clipboard variants of Export/Import. Same JSON; thumbs included, so a big
+  // bank is a few hundred KB — well within clipboard limits (MBs) in all browsers.
+  const copyBankBtn = document.createElement('button');
+  copyBankBtn.textContent = 'Copy';
+  copyBankBtn.title = 'Copy this bank as JSON to the clipboard';
+  copyBankBtn.style.cssText = btnBaseStyle;
+  copyBankBtn.addEventListener('click', async () => {
+    if (isPreview() || activeBankId === null) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(exportBank(activeBankId)));
+      showSuccess('Bank copied to clipboard');
+    } catch {
+      showWarning('Could not copy to clipboard');
+    }
+  });
+
+  const pasteBankBtn = document.createElement('button');
+  pasteBankBtn.textContent = 'Paste';
+  pasteBankBtn.title = 'Add a bank from JSON on the clipboard';
+  pasteBankBtn.style.cssText = btnBaseStyle;
+  pasteBankBtn.addEventListener('click', async () => {
+    if (isPreview()) return;
+    try {
+      const data = JSON.parse(await navigator.clipboard.readText());
+      const id = importBankFile(data);
+      switchBank(id);
+      showSuccess(`Pasted "${data.name ?? 'bank'}"`);
+    } catch (e) {
+      showWarning('Clipboard has no valid bank');
+      console.error(e);
+    }
+  });
+
+  bankIoRow.append(exportBtn, importBtn, copyBankBtn, pasteBankBtn);
 
   // Row 2: per-scene actions
   const btnRow2 = document.createElement('div');
@@ -1154,6 +1226,7 @@ function initScenesPane(container, uiState = {}, initialSceneSlot = null, previe
 
   btnRow3.appendChild(shareBtn);
 
+  content.insertBefore(bankIoRow, bankRow.nextSibling);
   content.appendChild(btnRow1);
   content.appendChild(btnRow2);
   content.appendChild(btnRow3);
@@ -1221,6 +1294,37 @@ export function initUI(container, uiState = {}, initialSceneSlot = null, preview
   };
   uiContainer.addEventListener('wheel', armScrollSnap, { passive: true });
   uiContainer.addEventListener('touchmove', armScrollSnap, { passive: true });
+
+  // Swipe the panel out to the right (it's docked on the right edge) to hide
+  // it — the touch equivalent of Tab; the floating "Show UI" button brings it
+  // back. Gestures that start on a draggable control (sliders, number fields,
+  // pads, color pickers, canvases, text inputs) are left alone, and the swipe
+  // must be clearly horizontal so normal vertical scrolling never triggers it.
+  const SWIPE_IGNORE = 'input, textarea, select, canvas, .tp-sldv, .tp-txtv, .tp-p2dv, .tp-colv, .tp-cswv';
+  const SWIPE_MIN_DX = 70;
+  let swipeStart = null;
+  uiContainer.addEventListener('touchstart', (e) => {
+    swipeStart = (e.touches.length === 1 && !e.target.closest(SWIPE_IGNORE))
+      ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
+      : null;
+  }, { passive: true });
+  uiContainer.addEventListener('touchend', (e) => {
+    if (!swipeStart) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - swipeStart.x;
+    const dy = t.clientY - swipeStart.y;
+    swipeStart = null;
+    if (dx > SWIPE_MIN_DX && dx > Math.abs(dy) * 2) setUiVisible(false);
+  }, { passive: true });
+  uiContainer.addEventListener('touchcancel', () => { swipeStart = null; }, { passive: true });
+
+  // Tap/click anywhere outside the panel toggles it, like Tab — a fallback for
+  // touch devices where the swipe is hard to test. Clicks inside the panel
+  // (and on the floating "Show UI" button, which has its own handler) are skipped.
+  document.addEventListener('click', (e) => {
+    if (uiContainer.contains(e.target) || uiHiddenIndicator?.contains(e.target)) return;
+    setUiVisible(!uiVisible);
+  });
 
   document.addEventListener('keydown', (e) => {
     // Ctrl+R — "restart everything" (see restartEverything), not a page
