@@ -1431,7 +1431,15 @@ export function initUI(container, uiState = {}, initialSceneSlot = null, preview
   addPane = new Pane({ container, title: 'Add Layer', expanded: addPaneExpanded });
   addPane.element.style.marginBottom = '1rem';
   addPane.on('fold', (ev) => { addPaneExpanded = ev.expanded; save(); });
+  addPane.element.classList.add('locks-while-playing');
   addCollapseAllCtrl(addPane);
+  // Shown (via CSS) only while the scene player runs, when the Add Layer and
+  // Layers controls are locked. Tap = pause the player and unlock for editing.
+  const lockBanner = document.createElement('button');
+  lockBanner.className = 'scene-lock-banner';
+  lockBanner.innerHTML = '▶ Tap <b style="text-decoration:underline">here</b> to edit this scene';
+  lockBanner.addEventListener('click', () => pauseScenePlayerForEdit());
+  container.insertBefore(lockBanner, addPane.element);
   Object.entries(LAYER_TYPES).forEach(([type, def]) => {
     if (def.noLayer) return;
     const btn = addPane.addButton({ title: def.shortLabel ?? def.label }).on('click', () => {
@@ -1451,24 +1459,23 @@ export function initUI(container, uiState = {}, initialSceneSlot = null, preview
 
   layersPane = new Pane({ container, title: 'Layers', expanded: layersPaneExpanded });
   layersPane.element.style.marginBottom = '1rem';
-  layersPane.element.classList.add('layers-pane');
+  layersPane.element.classList.add('locks-while-playing');
   layersPane.on('fold', (ev) => { layersPaneExpanded = ev.expanded; save(); });
 
-  // Shown (via CSS) only while the scene player runs, when the Layers
-  // controls are locked. Tap = pause the player and unlock for editing.
-  const lockBanner = document.createElement('button');
-  lockBanner.className = 'scene-lock-banner';
-  lockBanner.innerHTML = '▶ Tap <b style="text-decoration:underline">here</b> to edit this scene';
-  lockBanner.addEventListener('click', () => pauseScenePlayerForEdit());
-  container.insertBefore(lockBanner, layersPane.element);
+  addCollapseAllCtrl(layersPane);
   // Locked controls have pointer-events: none, so a tap on one lands on the
   // pane itself — nudge the banner so it's clear why nothing happened.
-  layersPane.element.addEventListener('pointerdown', (e) => {
+  [addPane, layersPane].forEach(pane => pane.element.addEventListener('pointerdown', (e) => {
     if (!uiContainer.classList.contains('scene-playing')) return;
     if (e.target.closest('.tp-fldv_b, .tp-rotv_b')) return;
-    lockBanner.animate?.([{ filter: 'brightness(1)' }, { filter: 'brightness(1.9)' }, { filter: 'brightness(1)' }], { duration: 350 });
-  });
-  addCollapseAllCtrl(layersPane);
+    // Alarm-light flash: snaps on, holds, then fades off — twice.
+    lockBanner.animate?.([
+      { filter: 'brightness(1)',   easing: 'cubic-bezier(0.1, 0.9, 0.2, 1)' },
+      { filter: 'brightness(2.2)', offset: 0.2 },
+      { filter: 'brightness(2.2)', offset: 0.45, easing: 'ease-in' },
+      { filter: 'brightness(1)' },
+    ], { duration: 243, iterations: 2 });
+  }));
   buildLayersUI();
 }
 
