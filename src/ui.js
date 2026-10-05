@@ -1492,8 +1492,23 @@ export function initUI(container, uiState = {}, initialSceneSlot = null, preview
   // Tap/click anywhere outside the panel toggles it, like Tab — a fallback for
   // touch devices where the swipe is hard to test. Clicks inside the panel
   // (and on the floating "Show UI" button, which has its own handler) are skipped.
+  // A press that starts on the panel (e.g. dragging a slider out past its
+  // edge) ends in a click on the common ancestor outside it — remember where
+  // the press began so that never counts as a canvas click.
+  let pressStartedInUi = false;
+  document.addEventListener('pointerdown', (e) => {
+    const path = e.composedPath();
+    pressStartedInUi = path.includes(uiContainer) || !!(uiHiddenIndicator && path.includes(uiHiddenIndicator));
+  }, { capture: true, passive: true });
+
   document.addEventListener('click', (e) => {
-    if (uiContainer.contains(e.target) || uiHiddenIndicator?.contains(e.target)) return;
+    if (pressStartedInUi) { pressStartedInUi = false; return; }
+    // composedPath() is captured at dispatch, so it still includes the panel
+    // when the clicked control rebuilt the pane and was detached from the DOM
+    // before the event reached document (where .contains() would say "outside").
+    const path = e.composedPath();
+    if (path.includes(uiContainer) || (uiHiddenIndicator && path.includes(uiHiddenIndicator))) return;
+    if (!e.target.isConnected) return;
     setUiVisible(!uiVisible);
   });
 
